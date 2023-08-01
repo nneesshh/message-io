@@ -294,7 +294,7 @@ impl<S: Send + 'static> NodeListener<S> {
     /// // Blocked here until handler.stop() is called (1 sec).
     /// println!("Node is stopped");
     /// ```
-    pub fn for_each(mut self, mut event_callback: impl FnMut(NodeEvent<S>)) {
+    pub fn for_each(mut self, mut event_callback: impl FnMut(NodeEvent<S>) + Send) {
         // Stop cache events
         self.cache_running.store(false, Ordering::Relaxed);
         let (mut network_processor, mut cache) = self.network_cache_thread.join();
@@ -323,7 +323,7 @@ impl<S: Send + 'static> NodeListener<S> {
                 // It implies that any object moved into the callback do not have
                 // any concurrence issues.
                 #[allow(clippy::type_complexity)]
-                struct SendableEventCallback<'a, S>(Arc<Mutex<dyn FnMut(NodeEvent<S>) + 'a>>);
+                struct SendableEventCallback<'a, S>(Arc<Mutex<dyn FnMut(NodeEvent<S>) + Send + 'a>>);
                 #[allow(clippy::non_send_fields_in_send_ty)]
                 unsafe impl<'a, S> Send for SendableEventCallback<'a, S> {}
 
