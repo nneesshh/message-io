@@ -61,7 +61,7 @@ impl Endpoint {
         Endpoint::new(id, addr)
     }
 
-    pub(crate) fn new(resource_id: ResourceId, addr: SocketAddr) -> Self {
+    pub fn new(resource_id: ResourceId, addr: SocketAddr) -> Self {
         Self { resource_id, addr }
     }
 
