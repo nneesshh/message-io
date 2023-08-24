@@ -1,6 +1,4 @@
-use std::sync::{
-    atomic::{Ordering, AtomicUsize},
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Information about the type of resource
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -65,8 +63,7 @@ impl ResourceId {
     pub fn resource_type(&self) -> ResourceType {
         if self.id & (1 << Self::RESOURCE_TYPE_POS) != 0 {
             ResourceType::Local
-        }
-        else {
+        } else {
             ResourceType::Remote
         }
     }
@@ -106,7 +103,13 @@ impl std::fmt::Display for ResourceId {
             ResourceType::Local => "L",
             ResourceType::Remote => "R",
         };
-        write!(f, "[{}.{}.{}]", self.adapter_id(), resource_type, self.base_value())
+        write!(
+            f,
+            "[{}.{}.{}]",
+            self.adapter_id(),
+            resource_type,
+            self.base_value()
+        )
     }
 }
 
@@ -125,7 +128,11 @@ pub struct ResourceIdGenerator {
 
 impl ResourceIdGenerator {
     pub fn new(adapter_id: u8, resource_type: ResourceType) -> Self {
-        Self { last: AtomicUsize::new(0), adapter_id, resource_type }
+        Self {
+            last: AtomicUsize::new(1),
+            adapter_id,
+            resource_type,
+        }
     }
 
     /// Generates a new id.
