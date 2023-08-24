@@ -1,6 +1,4 @@
-use std::sync::{
-    atomic::{Ordering, AtomicUsize},
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Information about the type of resource
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -20,15 +18,15 @@ pub struct ResourceId {
 }
 
 impl ResourceId {
-    const ADAPTER_ID_POS: usize = 0;
-    const RESOURCE_TYPE_POS: usize = 7;
-    const BASE_VALUE_POS: usize = 8;
+    const RESOURCE_TYPE_POS: usize = 63;
+    const ADAPTER_ID_POS: usize = 56;
+    const BASE_VALUE_POS: usize = 0;
 
-    const ADAPTER_ID_MASK: u8 = 0b01111111; // 5 bits
-    const BASE_VALUE_MASK: usize = 0xFFFFFFFFFFFFFF00_u64 as usize; // 7 bytes
+    const ADAPTER_ID_MASK: usize = 0x7F00000000000000_u64 as usize; // 7 bits
+    const BASE_VALUE_MASK: usize = 0x00FFFFFFFFFFFFFF_u64 as usize; // 7 bytes
 
     pub const MAX_BASE_VALUE: usize = (Self::BASE_VALUE_MASK >> Self::BASE_VALUE_POS);
-    pub const MAX_ADAPTER_ID: u8 = (Self::ADAPTER_ID_MASK >> Self::ADAPTER_ID_POS);
+    pub const MAX_ADAPTER_ID: u8 = (Self::ADAPTER_ID_MASK >> Self::ADAPTER_ID_POS) as u8;
     pub const MAX_ADAPTERS: usize = Self::MAX_ADAPTER_ID as usize + 1;
 
     fn new(adapter_id: u8, resource_type: ResourceType, base_value: usize) -> Self {
@@ -50,8 +48,8 @@ impl ResourceId {
         };
 
         Self {
-            id: (adapter_id as usize) << Self::ADAPTER_ID_POS
-                | resource_type
+            id: resource_type
+                | (adapter_id as usize) << Self::ADAPTER_ID_POS
                 | base_value << Self::BASE_VALUE_POS,
         }
     }
@@ -65,8 +63,7 @@ impl ResourceId {
     pub fn resource_type(&self) -> ResourceType {
         if self.id & (1 << Self::RESOURCE_TYPE_POS) != 0 {
             ResourceType::Local
-        }
-        else {
+        } else {
             ResourceType::Remote
         }
     }
@@ -106,7 +103,13 @@ impl std::fmt::Display for ResourceId {
             ResourceType::Local => "L",
             ResourceType::Remote => "R",
         };
-        write!(f, "[{}.{}.{}]", self.adapter_id(), resource_type, self.base_value())
+        write!(
+            f,
+            "[{}.{}.{}]",
+            self.adapter_id(),
+            resource_type,
+            self.base_value()
+        )
     }
 }
 
@@ -125,7 +128,11 @@ pub struct ResourceIdGenerator {
 
 impl ResourceIdGenerator {
     pub fn new(adapter_id: u8, resource_type: ResourceType) -> Self {
-        Self { last: AtomicUsize::new(0), adapter_id, resource_type }
+        Self {
+            last: AtomicUsize::new(1),
+            adapter_id,
+            resource_type,
+        }
     }
 
     /// Generates a new id.
