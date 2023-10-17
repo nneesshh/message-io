@@ -45,7 +45,8 @@ pub struct EventReceiver<E> {
 }
 
 impl<E> Default for EventReceiver<E>
-where E: Send + 'static
+where
+    E: Send + 'static,
 {
     /// Creates a new event queue for generic incoming events.
     fn default() -> Self {
@@ -63,7 +64,8 @@ where E: Send + 'static
 }
 
 impl<E> EventReceiver<E>
-where E: Send + 'static
+where
+    E: Send + 'static,
 {
     /// Returns the internal sender reference to this queue.
     /// This reference can be safety cloned and shared to other threads
@@ -89,19 +91,16 @@ where E: Send + 'static
         // and the channel never can be considered disconnected.
         if !self.priority_receiver.is_empty() {
             self.priority_receiver.recv().unwrap()
-        }
-        else if self.timers.is_empty() {
+        } else if self.timers.is_empty() {
             select! {
                 recv(self.receiver) -> event => event.unwrap(),
                 recv(self.priority_receiver) -> event => event.unwrap(),
             }
-        }
-        else {
+        } else {
             let next_instant = *self.timers.iter().next().unwrap().0;
             if next_instant <= Instant::now() {
                 self.timers.remove(&next_instant).unwrap()
-            }
-            else {
+            } else {
                 select! {
                     recv(self.receiver) -> event => event.unwrap(),
                     recv(self.priority_receiver) -> event => event.unwrap(),
@@ -120,20 +119,17 @@ where E: Send + 'static
 
         if !self.priority_receiver.is_empty() {
             Some(self.priority_receiver.recv().unwrap())
-        }
-        else if self.timers.is_empty() {
+        } else if self.timers.is_empty() {
             select! {
                 recv(self.receiver) -> event => Some(event.unwrap()),
                 recv(self.priority_receiver) -> event => Some(event.unwrap()),
                 default(timeout) => None
             }
-        }
-        else {
+        } else {
             let next_instant = *self.timers.iter().next().unwrap().0;
             if next_instant <= Instant::now() {
                 self.timers.remove(&next_instant)
-            }
-            else {
+            } else {
                 select! {
                     recv(self.receiver) -> event => Some(event.unwrap()),
                     recv(self.priority_receiver) -> event => Some(event.unwrap()),
@@ -152,16 +148,14 @@ where E: Send + 'static
         self.enque_timers();
 
         if let Ok(priority_event) = self.priority_receiver.try_recv() {
-            return Some(priority_event)
-        }
-        else if let Some(next_instant) = self.timers.iter().next() {
+            return Some(priority_event);
+        } else if let Some(next_instant) = self.timers.iter().next() {
             if *next_instant.0 <= Instant::now() {
                 let instant = *next_instant.0;
-                return self.timers.remove(&instant)
+                return self.timers.remove(&instant);
             }
-        }
-        else if let Ok(event) = self.receiver.try_recv() {
-            return Some(event)
+        } else if let Ok(event) = self.receiver.try_recv() {
+            return Some(event);
         }
 
         None
@@ -177,7 +171,8 @@ pub struct EventSender<E> {
 }
 
 impl<E> EventSender<E>
-where E: Send + 'static
+where
+    E: Send + 'static,
 {
     fn new(
         sender: Sender<E>,
@@ -217,7 +212,8 @@ where E: Send + 'static
 }
 
 impl<E> Clone for EventSender<E>
-where E: Send + 'static
+where
+    E: Send + 'static,
 {
     fn clone(&self) -> Self {
         EventSender::new(

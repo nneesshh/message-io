@@ -41,15 +41,14 @@ impl Decoder {
                     decoded_callback(decoded);
                     if !not_decoded.is_empty() {
                         next_data = not_decoded;
-                        continue
-                    }
-                    else {
-                        break
+                        continue;
+                    } else {
+                        break;
                     }
                 }
             }
             self.stored.extend_from_slice(next_data);
-            break
+            break;
         }
     }
 
@@ -65,10 +64,9 @@ impl Decoder {
                 if let Some(x) = decode_size(&self.stored) {
                     // Now we know the size
                     (x, &data[max_remaining..])
-                }
-                else {
+                } else {
                     // We still don't know the size (data was too small)
-                    return None
+                    return None;
                 }
             }
         };
@@ -79,8 +77,7 @@ impl Decoder {
             // We need more data to decoder
             self.stored.extend_from_slice(data);
             None
-        }
-        else {
+        } else {
             // We can complete a message here
             let (to_store, remaining) = data.split_at(remaining);
             self.stored.extend_from_slice(to_store);
@@ -95,8 +92,7 @@ impl Decoder {
     pub fn decode(&mut self, data: &[u8], mut decoded_callback: impl FnMut(&[u8])) {
         if self.stored.is_empty() {
             self.try_decode(data, decoded_callback);
-        }
-        else {
+        } else {
             //There was already data in the Decoder
             if let Some((decoded_data, remaining)) = self.store_and_decoded_data(data) {
                 decoded_callback(decoded_data);

@@ -138,7 +138,7 @@ impl Remote for RemoteResource {
 
                             #[cfg(not(target_os = "windows"))]
                             if let Err(err) = _peek_result {
-                                break Self::io_error_to_read_status(&err)
+                                break Self::io_error_to_read_status(&err);
                             }
                         }
                         Message::Close(_) => break ReadStatus::Disconnected,
@@ -147,7 +147,7 @@ impl Remote for RemoteResource {
                     Err(Error::Io(ref err)) => break Self::io_error_to_read_status(err),
                     Err(err) => {
                         log::error!("WS receive error: {}", err);
-                        break ReadStatus::Disconnected // should not happen
+                        break ReadStatus::Disconnected; // should not happen
                     }
                 },
                 RemoteState::Handshake(_) => unreachable!(),
@@ -172,7 +172,7 @@ impl Remote for RemoteResource {
                         Err(Error::Capacity(_)) => break SendStatus::MaxPacketSizeExceeded,
                         Err(err) => {
                             log::error!("WS send error: {}", err);
-                            break SendStatus::ResourceNotFound // should not happen
+                            break SendStatus::ResourceNotFound; // should not happen
                         }
                     }
                 }
@@ -193,7 +193,7 @@ impl Remote for RemoteResource {
                     if tcp_status != PendingStatus::Ready {
                         // TCP handshake not ready yet.
                         *pending = Some(PendingHandshake::Connect(url, stream));
-                        return tcp_status
+                        return tcp_status;
                     }
                     let stream_backup = stream.clone();
                     match ws_connect(url, stream) {
@@ -308,11 +308,9 @@ impl RemoteResource {
     fn io_error_to_read_status(err: &io::Error) -> ReadStatus {
         if err.kind() == io::ErrorKind::WouldBlock {
             ReadStatus::WaitNextEvent
-        }
-        else if err.kind() == io::ErrorKind::ConnectionReset {
+        } else if err.kind() == io::ErrorKind::ConnectionReset {
             ReadStatus::Disconnected
-        }
-        else {
+        } else {
             log::error!("WS receive error: {}", err);
             ReadStatus::Disconnected // should not happen
         }

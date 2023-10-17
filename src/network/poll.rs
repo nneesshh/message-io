@@ -1,4 +1,6 @@
-use super::resource_id::{ResourceId, ResourceType, ResourceIdGenerator};
+use super::resource_id::{
+    RESERVED_BYTES_MASK, RESERVED_BYTES_POS, ResourceId, ResourceType, ResourceIdGenerator,
+};
 
 use mio::{Poll as MioPoll, Interest, Token, Events, Registry, Waker};
 use mio::event::{Source};
@@ -25,13 +27,13 @@ pub enum PollEvent {
 
 impl From<Token> for ResourceId {
     fn from(token: Token) -> Self {
-        (token.0 >> Poll::RESERVED_BITS).into()
+        (token.0 & !RESERVED_BYTES_MASK).into()
     }
 }
 
 impl From<ResourceId> for Token {
     fn from(id: ResourceId) -> Self {
-        Token((id.raw() << Poll::RESERVED_BITS) | 1)
+        Token((id.raw() & !RESERVED_BYTES_MASK) | (0x55 << RESERVED_BYTES_POS))
     }
 }
 
@@ -55,11 +57,12 @@ impl Default for Poll {
 
 impl Poll {
     const EVENTS_SIZE: usize = 1024;
-    const RESERVED_BITS: usize = 1;
     const WAKER_TOKEN: Token = Token(0);
 
     pub fn process_event<C>(&mut self, timeout: Option<Duration>, mut event_callback: C)
-    where C: FnMut(PollEvent) {
+    where
+        C: FnMut(PollEvent),
+    {
         loop {
             match self.mio_poll.poll(&mut self.events, timeout) {
                 Ok(()) => {
@@ -67,8 +70,7 @@ impl Poll {
                         if Self::WAKER_TOKEN == mio_event.token() {
                             log::trace!("POLL WAKER EVENT");
                             event_callback(PollEvent::Waker);
-                        }
-                        else {
+                        } else {
                             let id = ResourceId::from(mio_event.token());
                             if mio_event.is_readable() {
                                 log::trace!("POLL EVENT (R): {}", id);
@@ -80,7 +82,7 @@ impl Poll {
                             }
                         }
                     }
-                    break
+                    break;
                 }
                 Err(ref err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(ref err) => Err(err).expect("No error here"),

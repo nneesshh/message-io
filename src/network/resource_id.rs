@@ -7,6 +7,9 @@ pub enum ResourceType {
     Remote,
 }
 
+pub const RESERVED_BYTES_POS: usize = 56; // tail pos, the highest byte of u64
+pub const RESERVED_BYTES_MASK: usize = 0xFF00000000000000_u64 as usize; // 1 byte
+
 /// Unique identifier of a network resource in your system.
 /// The identifier wrap 3 values,
 /// - The type, that can be a value of [ResourceType].
@@ -18,12 +21,12 @@ pub struct ResourceId {
 }
 
 impl ResourceId {
-    const RESOURCE_TYPE_POS: usize = 63;
-    const ADAPTER_ID_POS: usize = 56;
-    const BASE_VALUE_POS: usize = 0;
+    const RESOURCE_TYPE_POS: usize = 55; // tail pos
+    const ADAPTER_ID_POS: usize = 48; // tail pos
+    const BASE_VALUE_POS: usize = 0; // tail pos
 
-    const ADAPTER_ID_MASK: usize = 0x7F00000000000000_u64 as usize; // 7 bits
-    const BASE_VALUE_MASK: usize = 0x00FFFFFFFFFFFFFF_u64 as usize; // 7 bytes
+    const ADAPTER_ID_MASK: usize = 0x007F000000000000_u64 as usize; // 7 bits
+    const BASE_VALUE_MASK: usize = 0x0000FFFFFFFFFFFF_u64 as usize; // 6 bytes
 
     pub const MAX_BASE_VALUE: usize = (Self::BASE_VALUE_MASK >> Self::BASE_VALUE_POS);
     pub const MAX_ADAPTER_ID: u8 = (Self::ADAPTER_ID_MASK >> Self::ADAPTER_ID_POS) as u8;
@@ -103,13 +106,7 @@ impl std::fmt::Display for ResourceId {
             ResourceType::Local => "L",
             ResourceType::Remote => "R",
         };
-        write!(
-            f,
-            "[{}.{}.{}]",
-            self.adapter_id(),
-            resource_type,
-            self.base_value()
-        )
+        write!(f, "[{}.{}.{}]", self.adapter_id(), resource_type, self.base_value())
     }
 }
 
@@ -128,11 +125,7 @@ pub struct ResourceIdGenerator {
 
 impl ResourceIdGenerator {
     pub fn new(adapter_id: u8, resource_type: ResourceType) -> Self {
-        Self {
-            last: AtomicUsize::new(1),
-            adapter_id,
-            resource_type,
-        }
+        Self { last: AtomicUsize::new(1), adapter_id, resource_type }
     }
 
     /// Generates a new id.
