@@ -60,9 +60,9 @@ impl<T: Send + 'static> Drop for NamespacedThread<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn basic_usage() {

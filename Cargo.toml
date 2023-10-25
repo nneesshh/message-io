@@ -35,6 +35,9 @@ tungstenite = { version = "0.16", optional = true }
 url = { version = "2", optional = true }
 integer-encoding = "3"
 lazy_static = "1"
+bytemuck = { path = "../bytemuck", features = ["derive"] }
+bytes = { path = "../bytes", default-features = false }
+opool = { path = "../opool" }
 
 [target.'cfg(target_os = "linux")'.dependencies.nix]
 version = "0.26"
@@ -50,9 +53,9 @@ bincode = "1"
 criterion = "0.4"
 fern = "0.6"
 chrono = { version = "0.4", features = ["clock"], default-features = false }
-test-case = "1"
-rand = "0.8"
-httparse = "1"
+test-case = "3"
+rand = { path = "../rand" }
+httparse = { path = "../httparse" }
 doc-comment = "0.3"
 
 [[bench]]

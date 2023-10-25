@@ -1,7 +1,7 @@
-use crossbeam_channel::{self, Sender, Receiver, select};
+use crossbeam_channel::{self, select, Receiver, Sender};
 
-use std::time::{Instant, Duration};
-use std::collections::{BTreeMap};
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 /// As a shortcut, it returns the sender and receiver queue as a tuple.
 ///

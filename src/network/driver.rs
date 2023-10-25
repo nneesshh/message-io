@@ -1,23 +1,25 @@
-use super::endpoint::{Endpoint};
-use super::resource_id::{ResourceId, ResourceType};
+use crate::net_packet::{take_small_packet, NetPacketGuard};
+
+use super::adapter::{AcceptedType, Adapter, Local, PendingStatus, ReadStatus, Remote, SendStatus};
+use super::endpoint::Endpoint;
 use super::poll::{Poll, Readiness};
-use super::registry::{ResourceRegistry, Register};
-use super::remote_addr::{RemoteAddr};
-use super::adapter::{Adapter, Remote, Local, SendStatus, AcceptedType, ReadStatus, PendingStatus};
+use super::registry::{Register, ResourceRegistry};
+use super::remote_addr::RemoteAddr;
+use super::resource_id::{ResourceId, ResourceType};
 use super::transport::{TransportConnect, TransportListen};
 
-use std::net::{SocketAddr};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
 use std::io::{self};
+use std::net::SocketAddr;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 #[cfg(doctest)]
-use super::transport::{Transport};
+use super::transport::Transport;
 
 /// Enum used to describe a network event that an internal transport adapter has produced.
-pub enum NetEvent<'a> {
+pub enum NetEvent {
     /// Connection result.
     /// This event is only generated after a [`crate::network::NetworkController::connect()`]
     /// call.
@@ -43,7 +45,7 @@ pub enum NetEvent<'a> {
     ///
     /// If you want a packet-based protocol over *TCP* use
     /// [`crate::network::Transport::FramedTcp`].
-    Message(Endpoint, &'a [u8]),
+    Message(Endpoint, NetPacketGuard),
 
     /// This event is only dispatched when a connection is lost.
     /// Remove explicitely a resource will NOT generate the event.
@@ -56,12 +58,14 @@ pub enum NetEvent<'a> {
     Disconnected(Endpoint),
 }
 
-impl std::fmt::Debug for NetEvent<'_> {
+impl std::fmt::Debug for NetEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let string = match self {
             Self::Connected(endpoint, status) => format!("Connected({endpoint}, {status})"),
             Self::Accepted(endpoint, id) => format!("Accepted({endpoint}, {id})"),
-            Self::Message(endpoint, data) => format!("Message({}, {})", endpoint, data.len()),
+            Self::Message(endpoint, data) => {
+                format!("Message({}, {})", endpoint, data.buffer_raw_len())
+            }
             Self::Disconnected(endpoint) => format!("Disconnected({endpoint})"),
         };
         write!(f, "NetEvent::{string}")
@@ -85,7 +89,7 @@ pub trait ActionController: Send + Sync {
 }
 
 pub trait EventProcessor: Send + Sync {
-    fn process(&self, id: ResourceId, readiness: Readiness, callback: &mut dyn FnMut(NetEvent<'_>));
+    fn process(&self, id: ResourceId, readiness: Readiness, callback: &mut dyn FnMut(NetEvent));
 }
 
 struct RemoteProperties {
@@ -207,7 +211,7 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
         &self,
         id: ResourceId,
         readiness: Readiness,
-        event_callback: &mut dyn FnMut(NetEvent<'_>),
+        event_callback: &mut dyn FnMut(NetEvent),
     ) {
         match id.resource_type() {
             ResourceType::Remote => {
@@ -251,7 +255,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         remote: &Arc<Register<R, RemoteProperties>>,
         endpoint: Endpoint,
         readiness: Readiness,
-        mut event_callback: impl FnMut(NetEvent<'_>),
+        mut event_callback: impl FnMut(NetEvent),
     ) {
         let status = remote.resource.pending(readiness);
         log::trace!("Resolve pending for {}: {:?}", endpoint, status);
@@ -278,7 +282,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         &self,
         remote: &Arc<Register<R, RemoteProperties>>,
         endpoint: Endpoint,
-        mut event_callback: impl FnMut(NetEvent<'_>),
+        mut event_callback: impl FnMut(NetEvent),
     ) {
         if !remote.resource.ready_to_write() {
             event_callback(NetEvent::Disconnected(endpoint));
@@ -289,7 +293,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         &self,
         remote: &Arc<Register<R, RemoteProperties>>,
         endpoint: Endpoint,
-        mut event_callback: impl FnMut(NetEvent<'_>),
+        mut event_callback: impl FnMut(NetEvent),
     ) {
         let status =
             remote.resource.receive(|data| event_callback(NetEvent::Message(endpoint, data)));
@@ -306,7 +310,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         &self,
         local: &Arc<Register<L, LocalProperties>>,
         id: ResourceId,
-        mut event_callback: impl FnMut(NetEvent<'_>),
+        mut event_callback: impl FnMut(NetEvent),
     ) {
         local.resource.accept(|accepted| {
             log::trace!("Accepted type: {}", accepted);
@@ -320,7 +324,10 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
                 }
                 AcceptedType::Data(addr, data) => {
                     let endpoint = Endpoint::new(id, addr);
-                    event_callback(NetEvent::Message(endpoint, data));
+
+                    let mut input_buffer = take_small_packet();
+                    input_buffer.append_slice(data);
+                    event_callback(NetEvent::Message(endpoint, input_buffer));
                 }
             }
         });

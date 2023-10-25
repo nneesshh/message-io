@@ -1,12 +1,13 @@
+use crate::net_packet::NetPacketGuard;
 use crate::network::transport::{TransportConnect, TransportListen};
 
-use super::remote_addr::{RemoteAddr};
-use super::poll::{Readiness};
+use super::poll::Readiness;
+use super::remote_addr::RemoteAddr;
 
-use mio::event::{Source};
+use mio::event::Source;
 
-use std::net::{SocketAddr};
 use std::io::{self};
+use std::net::SocketAddr;
 
 /// High level trait to represent an adapter for a transport protocol.
 /// The adapter is only used to identify the resources of your adapter.
@@ -141,7 +142,7 @@ pub trait Remote: Resource + Sized {
     /// Note that `receive()` could imply more than one call to `read`.
     /// The implementator must be read all data from the resource.
     /// For most of the cases it means read until the network resource returns `WouldBlock`.
-    fn receive(&self, process_data: impl FnMut(&[u8])) -> ReadStatus;
+    fn receive(&self, process_data: impl FnMut(NetPacketGuard)) -> ReadStatus;
 
     /// Sends raw data from a resource.
     /// The resource must be *ready* to receive this call.

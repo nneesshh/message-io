@@ -1,15 +1,16 @@
 #![allow(unused_variables)]
 
+use crate::net_packet::NetPacketGuard;
 use crate::network::adapter::{
-    Resource, Remote, Local, Adapter, SendStatus, AcceptedType, ReadStatus, ConnectionInfo,
-    ListeningInfo, PendingStatus,
+    AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
+    Resource, SendStatus,
 };
-use crate::network::{RemoteAddr, Readiness, TransportConnect, TransportListen};
+use crate::network::{Readiness, RemoteAddr, TransportConnect, TransportListen};
 
-use mio::event::{Source};
+use mio::event::Source;
 
-use std::net::{SocketAddr};
 use std::io::{self};
+use std::net::SocketAddr;
 
 pub(crate) struct MyAdapter;
 impl Adapter for MyAdapter {
@@ -32,7 +33,7 @@ impl Remote for RemoteResource {
         todo!()
     }
 
-    fn receive(&self, process_data: impl FnMut(&[u8])) -> ReadStatus {
+    fn receive(&self, process_data: impl FnMut(NetPacketGuard)) -> ReadStatus {
         todo!()
     }
 

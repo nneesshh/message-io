@@ -1,15 +1,16 @@
-use super::loader::{DriverLoader};
+use super::loader::DriverLoader;
 
 #[cfg(feature = "tcp")]
 use crate::adapters::tcp::{TcpAdapter, TcpConnectConfig, TcpListenConfig};
-#[cfg(feature = "tcp")]
+/*#[cfg(feature = "tcp")]
 use crate::adapters::framed_tcp::{FramedTcpAdapter, FramedTcpConnectConfig, FramedTcpListenConfig};
 #[cfg(feature = "udp")]
 use crate::adapters::udp::{self, UdpAdapter, UdpConnectConfig, UdpListenConfig};
 #[cfg(feature = "websocket")]
 use crate::adapters::ws::{self, WsAdapter};
+*/
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Enum to identified the underlying transport used.
 /// It can be passed to
@@ -24,7 +25,7 @@ pub enum Transport {
     /// If you want a packet based way to send over TCP, use `FramedTcp` instead.
     #[cfg(feature = "tcp")]
     Tcp,
-
+    /*
     /// Tcp framed protocol (available through the *tcp* feature).
     /// Like TCP, but encoded with a slim frame layer to manage the data as a packet,
     /// instead of as a stream.
@@ -48,6 +49,7 @@ pub enum Transport {
     /// websocket with the following uri: `ws://{SocketAddr}/message-io-default`.
     #[cfg(feature = "websocket")]
     Ws,
+    */
 }
 
 impl Transport {
@@ -57,12 +59,13 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Self::Tcp => loader.mount(self.id(), TcpAdapter),
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Self::FramedTcp => loader.mount(self.id(), FramedTcpAdapter),
             #[cfg(feature = "udp")]
             Self::Udp => loader.mount(self.id(), UdpAdapter),
             #[cfg(feature = "websocket")]
             Self::Ws => loader.mount(self.id(), WsAdapter),
+            */
         };
     }
 
@@ -76,12 +79,13 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Self::Tcp => usize::MAX,
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Self::FramedTcp => usize::MAX,
             #[cfg(feature = "udp")]
             Self::Udp => udp::MAX_LOCAL_PAYLOAD_LEN,
             #[cfg(feature = "websocket")]
             Self::Ws => ws::MAX_PAYLOAD_LEN,
+            */
         }
     }
 
@@ -91,12 +95,13 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Transport::Tcp => true,
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Transport::FramedTcp => true,
             #[cfg(feature = "udp")]
             Transport::Udp => false,
             #[cfg(feature = "websocket")]
             Transport::Ws => true,
+            */
         }
     }
 
@@ -110,12 +115,13 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Transport::Tcp => false,
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Transport::FramedTcp => true,
             #[cfg(feature = "udp")]
             Transport::Udp => true,
             #[cfg(feature = "websocket")]
             Transport::Ws => true,
+            */
         }
     }
 
@@ -125,12 +131,13 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Transport::Tcp => 0,
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Transport::FramedTcp => 1,
             #[cfg(feature = "udp")]
             Transport::Udp => 2,
             #[cfg(feature = "websocket")]
             Transport::Ws => 3,
+            */
         }
     }
 }
@@ -140,12 +147,13 @@ impl From<u8> for Transport {
         match id {
             #[cfg(feature = "tcp")]
             0 => Transport::Tcp,
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             1 => Transport::FramedTcp,
             #[cfg(feature = "udp")]
             2 => Transport::Udp,
             #[cfg(feature = "websocket")]
             3 => Transport::Ws,
+            */
             _ => panic!("Not available transport"),
         }
     }
@@ -161,12 +169,13 @@ impl std::fmt::Display for Transport {
 pub enum TransportConnect {
     #[cfg(feature = "tcp")]
     Tcp(TcpConnectConfig),
-    #[cfg(feature = "tcp")]
+    /*#[cfg(feature = "tcp")]
     FramedTcp(FramedTcpConnectConfig),
     #[cfg(feature = "udp")]
     Udp(UdpConnectConfig),
     #[cfg(feature = "websocket")]
     Ws,
+    */
 }
 
 impl TransportConnect {
@@ -174,12 +183,13 @@ impl TransportConnect {
         let transport = match self {
             #[cfg(feature = "tcp")]
             Self::Tcp(_) => Transport::Tcp,
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Self::FramedTcp(_) => Transport::FramedTcp,
             #[cfg(feature = "udp")]
             Self::Udp(_) => Transport::Udp,
             #[cfg(feature = "websocket")]
             Self::Ws => Transport::Ws,
+            */
         };
 
         transport.id()
@@ -191,12 +201,13 @@ impl From<Transport> for TransportConnect {
         match transport {
             #[cfg(feature = "tcp")]
             Transport::Tcp => Self::Tcp(TcpConnectConfig::default()),
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Transport::FramedTcp => Self::FramedTcp(FramedTcpConnectConfig::default()),
             #[cfg(feature = "udp")]
             Transport::Udp => Self::Udp(UdpConnectConfig::default()),
             #[cfg(feature = "websocket")]
             Transport::Ws => Self::Ws,
+            */
         }
     }
 }
@@ -205,12 +216,13 @@ impl From<Transport> for TransportConnect {
 pub enum TransportListen {
     #[cfg(feature = "tcp")]
     Tcp(TcpListenConfig),
-    #[cfg(feature = "tcp")]
+    /*#[cfg(feature = "tcp")]
     FramedTcp(FramedTcpListenConfig),
     #[cfg(feature = "udp")]
     Udp(UdpListenConfig),
     #[cfg(feature = "websocket")]
     Ws,
+    */
 }
 
 impl TransportListen {
@@ -218,12 +230,13 @@ impl TransportListen {
         let transport = match self {
             #[cfg(feature = "tcp")]
             Self::Tcp(_) => Transport::Tcp,
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Self::FramedTcp(_) => Transport::FramedTcp,
             #[cfg(feature = "udp")]
             Self::Udp(_) => Transport::Udp,
             #[cfg(feature = "websocket")]
             Self::Ws => Transport::Ws,
+            */
         };
 
         transport.id()
@@ -235,12 +248,13 @@ impl From<Transport> for TransportListen {
         match transport {
             #[cfg(feature = "tcp")]
             Transport::Tcp => Self::Tcp(TcpListenConfig::default()),
-            #[cfg(feature = "tcp")]
+            /*#[cfg(feature = "tcp")]
             Transport::FramedTcp => Self::FramedTcp(FramedTcpListenConfig::default()),
             #[cfg(feature = "udp")]
             Transport::Udp => Self::Udp(UdpListenConfig::default()),
             #[cfg(feature = "websocket")]
             Transport::Ws => Self::Ws,
+            */
         }
     }
 }
