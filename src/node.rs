@@ -297,12 +297,15 @@ impl<S: Send + 'static> NodeListener<S> {
             NamespacedThread::spawn("node-network-thread", move || {
                 //
                 while handler.is_running() {
-                    network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), |net_event| {
-                        let mut event_callback = multiplexed.lock().expect(OTHER_THREAD_ERR);
-                        if handler.is_running() {
-                            event_callback(NodeEvent::Network(net_event));
-                        }
-                    });
+                    network_processor.process_poll_event(
+                        Some(*SAMPLING_TIMEOUT),
+                        |net_event| {
+                            let mut event_callback = multiplexed.lock().expect(OTHER_THREAD_ERR);
+                            if handler.is_running() {
+                                event_callback(NodeEvent::Network(net_event));
+                            }
+                        },
+                    );
                 }
             })
         };
