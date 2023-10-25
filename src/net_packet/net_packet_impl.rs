@@ -1,5 +1,3 @@
-use bytemuck::NoUninit;
-
 use super::Buffer;
 
 /// Buffer size
@@ -9,21 +7,6 @@ pub const BUFFER_RESERVED_PREPEND_SIZE: usize = 8;
 
 /// 协议号类型，2字节
 pub type CmdId = u16;
-
-/// 包类型
-#[derive(Debug, PartialEq, Copy, Clone, NoUninit)]
-#[repr(u8)]
-pub enum PacketType {
-    Server = 0, // 服务器内部包：不加密
-
-    Client = 1, // 处理客户端包：收包解密，发包不加密
-    Robot = 2,  // 模拟客户端包：发包加密，收包不需要解密
-
-    ClientWs = 3, // 处理客户端包（WS）：收包解密，发包不加密
-    RobotWs = 4,  // 模拟客户端包（WS）：发包加密，收包不需要解密
-
-    Redis = 5, // Redis客户端
-}
 
 ///
 pub enum PacketSizeType {
