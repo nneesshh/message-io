@@ -1,4 +1,4 @@
-use crate::net_packet::{take_small_packet, NetPacketGuard};
+use net_packet::{take_small_packet, NetPacketGuard};
 
 use super::adapter::{AcceptedType, Adapter, Local, PendingStatus, ReadStatus, Remote, SendStatus};
 use super::endpoint::Endpoint;

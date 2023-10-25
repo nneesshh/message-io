@@ -1,4 +1,5 @@
-use crate::net_packet::NetPacketGuard;
+use net_packet::NetPacketGuard;
+
 use crate::network::transport::{TransportConnect, TransportListen};
 
 use super::poll::Readiness;

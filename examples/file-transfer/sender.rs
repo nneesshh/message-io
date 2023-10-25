@@ -18,7 +18,7 @@ pub fn run(file_path: String) {
     let (handler, listener) = node::split();
 
     let server_addr = "127.0.0.1:3005";
-    let (server_id, _) = handler.network().connect(Transport::Tcp, server_addr).unwrap();
+    let (server_id, _) = handler.network().connect(Transport::Ws, server_addr).unwrap();
 
     let file_size = fs::metadata(&file_path).unwrap().len() as usize;
     let mut file = File::open(&file_path).unwrap();

@@ -1,30 +1,32 @@
+use net_packet::{take_packet, NetPacketGuard};
+
 use crate::network::adapter::{
-    Resource, Remote, Local, Adapter, SendStatus, AcceptedType, ReadStatus, ConnectionInfo,
-    ListeningInfo, PendingStatus,
+    AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
+    Resource, SendStatus,
 };
-use crate::network::{RemoteAddr, Readiness};
-use crate::util::thread::{OTHER_THREAD_ERR};
+use crate::network::{Readiness, RemoteAddr};
 use crate::network::{TransportConnect, TransportListen};
+use crate::util::thread::OTHER_THREAD_ERR;
 
-use mio::event::{Source};
-use mio::net::{TcpStream, TcpListener};
+use mio::event::Source;
+use mio::net::{TcpListener, TcpStream};
 
-use tungstenite::protocol::{WebSocket, Message};
-use tungstenite::{accept as ws_accept};
-use tungstenite::client::{client as ws_connect};
+use tungstenite::accept as ws_accept;
+use tungstenite::client::client as ws_connect;
+use tungstenite::error::Error;
 use tungstenite::handshake::{
+    client::ClientHandshake,
+    server::{NoCallback, ServerHandshake},
     HandshakeError, MidHandshake,
-    server::{ServerHandshake, NoCallback},
-    client::{ClientHandshake},
 };
-use tungstenite::error::{Error};
+use tungstenite::protocol::{Message, WebSocket};
 
 use url::Url;
 
-use std::sync::{Mutex, Arc};
-use std::net::{SocketAddr};
 use std::io::{self, ErrorKind};
-use std::ops::{DerefMut};
+use std::net::SocketAddr;
+use std::ops::DerefMut;
+use std::sync::{Arc, Mutex};
 
 /// Max message size for default config
 // From https://docs.rs/tungstenite/0.13.0/src/tungstenite/protocol/mod.rs.html#65
@@ -113,13 +115,13 @@ impl Remote for RemoteResource {
         })
     }
 
-    fn receive(&self, mut process_data: impl FnMut(&[u8])) -> ReadStatus {
+    fn receive(&self, mut process_data: impl FnMut(NetPacketGuard)) -> ReadStatus {
         loop {
             // "emulates" full duplex for the websocket case locking here and not outside the loop.
             let mut state = self.state.lock().expect(OTHER_THREAD_ERR);
             let deref_state = state.deref_mut();
             match deref_state {
-                RemoteState::WebSocket(web_socket) => match web_socket.read_message() {
+                RemoteState::WebSocket(web_socket) => match web_socket.read() {
                     Ok(message) => match message {
                         Message::Binary(data) => {
                             // As an optimization.
@@ -134,7 +136,11 @@ impl Remote for RemoteResource {
                             // We can not call process_data while the socket is blocked.
                             // The user could lock it again if sends from the callback.
                             drop(state);
-                            process_data(&data);
+
+                            //
+                            let mut input_buffer = take_packet(data.len());
+                            input_buffer.append_slice(data.as_slice());
+                            process_data(input_buffer);
 
                             #[cfg(not(target_os = "windows"))]
                             if let Err(err) = _peek_result {
@@ -162,12 +168,12 @@ impl Remote for RemoteResource {
         match deref_state {
             RemoteState::WebSocket(web_socket) => {
                 let message = Message::Binary(data.to_vec());
-                let mut result = web_socket.write_message(message);
+                let mut result = web_socket.send(message);
                 loop {
                     match result {
                         Ok(_) => break SendStatus::Sent,
                         Err(Error::Io(ref err)) if err.kind() == ErrorKind::WouldBlock => {
-                            result = web_socket.write_pending();
+                            result = web_socket.flush();
                         }
                         Err(Error::Capacity(_)) => break SendStatus::MaxPacketSizeExceeded,
                         Err(err) => {

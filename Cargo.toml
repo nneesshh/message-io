@@ -30,13 +30,14 @@ crossbeam-utils = "0.8"
 log = "0.4"
 strum = { version = "0.24", features = ["derive"] }
 socket2 = { version = "0.5", features = ["all"], optional = true}
-tungstenite = { version = "0.16", optional = true }
 url = { version = "2", optional = true }
 integer-encoding = "3"
 lazy_static = "1"
 bytemuck = { path = "../bytemuck", features = ["derive"] }
 bytes = { path = "../bytes", default-features = false }
+net_packet = { path = "../net_packet" }
 opool = { path = "../opool" }
+tungstenite = { path = "../tungstenite-rs", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies.nix]
 version = "0.26"

@@ -1,6 +1,7 @@
 pub use socket2::TcpKeepalive;
 
-use crate::net_packet::{take_small_packet, NetPacketGuard, SMALL_PACKET_MAX_SIZE};
+use net_packet::{take_small_packet, NetPacketGuard, SMALL_PACKET_MAX_SIZE};
+
 use crate::network::adapter::{
     AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
     Resource, SendStatus,
@@ -102,7 +103,7 @@ impl Remote for RemoteResource {
     ) -> io::Result<ConnectionInfo<Self>> {
         let config = match config {
             TransportConnect::Tcp(config) => config,
-            //_ => panic!("Internal error: Got wrong config"),
+            _ => panic!("Internal error: Got wrong config"),
         };
         let peer_addr = *remote_addr.socket_addr();
 
@@ -266,7 +267,7 @@ impl Local for LocalResource {
     fn listen_with(config: TransportListen, addr: SocketAddr) -> io::Result<ListeningInfo<Self>> {
         let config = match config {
             TransportListen::Tcp(config) => config,
-            //_ => panic!("Internal error: Got wrong config"),
+            _ => panic!("Internal error: Got wrong config"),
         };
 
         let socket = Socket::new(

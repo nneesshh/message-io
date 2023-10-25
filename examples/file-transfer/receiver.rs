@@ -18,7 +18,7 @@ pub fn run() {
     let (handler, listener) = node::split::<()>();
 
     let listen_addr = "127.0.0.1:3005";
-    handler.network().listen(Transport::Tcp, listen_addr).unwrap();
+    handler.network().listen(Transport::Ws, listen_addr).unwrap();
     println!("Receiver running by TCP at {}", listen_addr);
 
     let mut transfers: HashMap<Endpoint, Transfer> = HashMap::new();

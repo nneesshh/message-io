@@ -1,6 +1,7 @@
 #![allow(unused_variables)]
 
-use crate::net_packet::NetPacketGuard;
+use net_packet::NetPacketGuard;
+
 use crate::network::adapter::{
     AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
     Resource, SendStatus,
