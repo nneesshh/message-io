@@ -1,34 +1,30 @@
-pub use socket2::{TcpKeepalive};
+pub use socket2::TcpKeepalive;
 
+use crate::net_packet::{take_small_packet, NetPacketGuard, SMALL_PACKET_MAX_SIZE};
 use crate::network::adapter::{
-    Resource, Remote, Local, Adapter, SendStatus, AcceptedType, ReadStatus, ConnectionInfo,
-    ListeningInfo, PendingStatus,
+    AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
+    Resource, SendStatus,
 };
-use crate::network::{RemoteAddr, Readiness, TransportConnect, TransportListen};
+use crate::network::{Readiness, RemoteAddr, TransportConnect, TransportListen};
 
+use mio::event::Source;
 use mio::net::{TcpListener, TcpStream};
-use mio::event::{Source};
 
-use socket2::{Socket, Domain, Type, Protocol};
+use socket2::{Domain, Protocol, Socket, Type};
 
-use std::net::{SocketAddr};
 #[cfg(unix)]
-use std::ffi::{CString};
+use std::ffi::CString;
 use std::io::{self, ErrorKind, Read, Write};
+use std::mem::forget;
+use std::net::SocketAddr;
 #[cfg(target_os = "macos")]
 use std::num::NonZeroU32;
-use std::ops::{Deref};
-use std::mem::{forget, MaybeUninit};
+use std::ops::Deref;
 use std::os::raw::c_int;
 #[cfg(target_os = "windows")]
-use std::os::windows::io::{FromRawSocket, AsRawSocket};
+use std::os::windows::io::{AsRawSocket, FromRawSocket};
 #[cfg(not(target_os = "windows"))]
 use std::os::{fd::AsRawFd, unix::io::FromRawFd};
-
-/// Size of the internal reading buffer.
-/// It implies that at most the generated [`crate::network::NetEvent::Message`]
-/// will contains a chunk of data of this value.
-pub const INPUT_BUFFER_SIZE: usize = u16::MAX as usize; // 2^16 - 1
 
 /// The maximum length of the pending (unaccepted) connection queue of a listener.
 pub const LISTENER_BACKLOG: c_int = 1024;
@@ -106,7 +102,7 @@ impl Remote for RemoteResource {
     ) -> io::Result<ConnectionInfo<Self>> {
         let config = match config {
             TransportConnect::Tcp(config) => config,
-            _ => panic!("Internal error: Got wrong config"),
+            //_ => panic!("Internal error: Got wrong config"),
         };
         let peer_addr = *remote_addr.socket_addr();
 
@@ -160,15 +156,19 @@ impl Remote for RemoteResource {
         })
     }
 
-    fn receive(&self, mut process_data: impl FnMut(&[u8])) -> ReadStatus {
-        let buffer: MaybeUninit<[u8; INPUT_BUFFER_SIZE]> = MaybeUninit::uninit();
-        let mut input_buffer = unsafe { buffer.assume_init() }; // Avoid to initialize the array
-
+    fn receive(&self, mut process_data: impl FnMut(NetPacketGuard)) -> ReadStatus {
         loop {
+            let mut input_buffer = take_small_packet();
+            let buf = input_buffer.extend(SMALL_PACKET_MAX_SIZE);
+
             let stream = &self.stream;
-            match stream.deref().read(&mut input_buffer) {
+            match stream.deref().read(buf) {
                 Ok(0) => break ReadStatus::Disconnected,
-                Ok(size) => process_data(&input_buffer[..size]),
+                Ok(size) => {
+                    //
+                    input_buffer.truncate(size);
+                    process_data(input_buffer)
+                }
                 Err(ref err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
                     break ReadStatus::WaitNextEvent
@@ -266,7 +266,7 @@ impl Local for LocalResource {
     fn listen_with(config: TransportListen, addr: SocketAddr) -> io::Result<ListeningInfo<Self>> {
         let config = match config {
             TransportListen::Tcp(config) => config,
-            _ => panic!("Internal error: Got wrong config"),
+            //_ => panic!("Internal error: Got wrong config"),
         };
 
         let socket = Socket::new(

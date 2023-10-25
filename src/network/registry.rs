@@ -1,10 +1,10 @@
-use super::resource_id::{ResourceId};
-use super::poll::{PollRegistry};
-use super::adapter::{Resource};
+use super::adapter::Resource;
+use super::poll::PollRegistry;
+use super::resource_id::ResourceId;
 
-use crate::util::thread::{OTHER_THREAD_ERR};
+use crate::util::thread::OTHER_THREAD_ERR;
 
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 pub struct Register<S: Resource, P> {

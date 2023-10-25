@@ -1,13 +1,12 @@
-use crate::network::{self, NetworkController, NetworkProcessor, NetEvent, Endpoint, ResourceId};
-use crate::events::{self, EventSender, EventReceiver};
+use crate::events::{self, EventReceiver, EventSender};
+use crate::network::{self, NetEvent, NetworkController, NetworkProcessor};
 use crate::util::thread::{NamespacedThread, OTHER_THREAD_ERR};
 
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
-use std::time::{Duration};
-use std::collections::{VecDeque};
+use std::time::Duration;
 
 lazy_static::lazy_static! {
     static ref SAMPLING_TIMEOUT: Duration = Duration::from_millis(50);
@@ -15,10 +14,10 @@ lazy_static::lazy_static! {
 
 /// Event returned by [`NodeListener::for_each()`] and [`NodeListener::for_each_async()`]
 /// when some network event or signal is received.
-pub enum NodeEvent<'a, S> {
+pub enum NodeEvent<S> {
     /// The `NodeEvent` is an event that comes from the network.
     /// See [`NetEvent`] to know about the different network events.
-    Network(NetEvent<'a>),
+    Network(NetEvent),
 
     /// The `NodeEvent` is a signal.
     /// A signal is an event produced by the own node to itself.
@@ -27,7 +26,7 @@ pub enum NodeEvent<'a, S> {
     Signal(S),
 }
 
-impl<'a, S: std::fmt::Debug> std::fmt::Debug for NodeEvent<'a, S> {
+impl<S: std::fmt::Debug> std::fmt::Debug for NodeEvent<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             NodeEvent::Network(net_event) => write!(f, "NodeEvent::Network({net_event:?})"),
@@ -36,9 +35,9 @@ impl<'a, S: std::fmt::Debug> std::fmt::Debug for NodeEvent<'a, S> {
     }
 }
 
-impl<'a, S> NodeEvent<'a, S> {
+impl<S> NodeEvent<S> {
     /// Assume the event is a [`NodeEvent::Network`], panics if not.
-    pub fn network(self) -> NetEvent<'a> {
+    pub fn network(self) -> NetEvent {
         match self {
             NodeEvent::Network(net_event) => net_event,
             NodeEvent::Signal(..) => panic!("NodeEvent must be a NetEvent"),
@@ -50,92 +49,6 @@ impl<'a, S> NodeEvent<'a, S> {
         match self {
             NodeEvent::Network(..) => panic!("NodeEvent must be a Signal"),
             NodeEvent::Signal(signal) => signal,
-        }
-    }
-}
-
-/// Analogous to [`NodeEvent`] but without reference the data.
-/// This kind of event is dispatched by `NodeListener::to_event_queue()`.
-/// It is useful when you need to move an [`NodeEvent`]
-#[derive(Clone)]
-pub enum StoredNodeEvent<S> {
-    /// The `StoredNodeEvent` is an event that comes from the network.
-    /// See [`NetEvent`] to know about the different network events.
-    Network(StoredNetEvent),
-
-    /// The `StoredNodeEvent` is a signal.
-    /// A signal is an event produced by the own node to itself.
-    /// You can send signals with timers or priority.
-    /// See [`EventSender`] to know about how to send signals.
-    Signal(S),
-}
-
-impl<S: std::fmt::Debug> std::fmt::Debug for StoredNodeEvent<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StoredNodeEvent::Network(net_event) => write!(f, "NodeEvent::Network({net_event:?})"),
-            StoredNodeEvent::Signal(signal) => write!(f, "NodeEvent::Signal({signal:?})"),
-        }
-    }
-}
-
-impl<S> StoredNodeEvent<S> {
-    /// Assume the event is a [`StoredNodeEvent::Network`], panics if not.
-    pub fn network(self) -> StoredNetEvent {
-        match self {
-            StoredNodeEvent::Network(net_event) => net_event,
-            StoredNodeEvent::Signal(..) => panic!("NodeEvent must be a NetEvent"),
-        }
-    }
-
-    /// Assume the event is a [`StoredNodeEvent::Signal`], panics if not.
-    pub fn signal(self) -> S {
-        match self {
-            StoredNodeEvent::Network(..) => panic!("NodeEvent must be a Signal"),
-            StoredNodeEvent::Signal(signal) => signal,
-        }
-    }
-}
-
-impl<S> From<NodeEvent<'_, S>> for StoredNodeEvent<S> {
-    fn from(node_event: NodeEvent<'_, S>) -> Self {
-        match node_event {
-            NodeEvent::Network(net_event) => StoredNodeEvent::Network(net_event.into()),
-            NodeEvent::Signal(signal) => StoredNodeEvent::Signal(signal),
-        }
-    }
-}
-
-/// Analogous to [`NetEvent`] but with static lifetime (without reference the data).
-/// This kind of event is dispatched by `NodeListener::to_event_queue()`
-/// and can be easily stored in any container.
-#[derive(Debug, Clone)]
-pub enum StoredNetEvent {
-    Connected(Endpoint, bool),
-    Accepted(Endpoint, ResourceId),
-    Message(Endpoint, Vec<u8>),
-    Disconnected(Endpoint),
-}
-
-impl From<NetEvent<'_>> for StoredNetEvent {
-    fn from(net_event: NetEvent<'_>) -> Self {
-        match net_event {
-            NetEvent::Connected(endpoint, status) => Self::Connected(endpoint, status),
-            NetEvent::Accepted(endpoint, id) => Self::Accepted(endpoint, id),
-            NetEvent::Message(endpoint, data) => Self::Message(endpoint, Vec::from(data)),
-            NetEvent::Disconnected(endpoint) => Self::Disconnected(endpoint),
-        }
-    }
-}
-
-impl StoredNetEvent {
-    /// Use this `StoredNetEvent` as a `NetEvent` referencing its data.
-    pub fn borrow(&self) -> NetEvent<'_> {
-        match self {
-            Self::Connected(endpoint, status) => NetEvent::Connected(*endpoint, *status),
-            Self::Accepted(endpoint, id) => NetEvent::Accepted(*endpoint, *id),
-            Self::Message(endpoint, data) => NetEvent::Message(*endpoint, data),
-            Self::Disconnected(endpoint) => NetEvent::Disconnected(*endpoint),
         }
     }
 }
@@ -240,37 +153,19 @@ impl<S: Send + 'static> Clone for NodeHandler<S> {
 
 /// Listen events for network and signal events.
 pub struct NodeListener<S: Send + 'static> {
-    network_cache_thread: NamespacedThread<(NetworkProcessor, VecDeque<StoredNetEvent>)>,
-    cache_running: Arc<AtomicBool>,
+    network_processor_opt: Option<NetworkProcessor>,
     signal_receiver: EventReceiver<S>,
     handler: NodeHandler<S>,
 }
 
 impl<S: Send + 'static> NodeListener<S> {
     fn new(
-        mut network_processor: NetworkProcessor,
+        network_processor: NetworkProcessor,
         signal_receiver: EventReceiver<S>,
         handler: NodeHandler<S>,
     ) -> NodeListener<S> {
-        // Spawn the network thread to be able to perform correctly any network action before
-        // for_each() call. Any generated event would be cached and offered to the user when they
-        // call for_each().
-        let cache_running = Arc::new(AtomicBool::new(true));
-        let network_cache_thread = {
-            let cache_running = cache_running.clone();
-            let mut cache = VecDeque::new();
-            NamespacedThread::spawn("node-network-cache-thread", move || {
-                while cache_running.load(Ordering::Relaxed) {
-                    network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), |net_event| {
-                        log::trace!("Cached {:?}", net_event);
-                        cache.push_back(net_event.into());
-                    });
-                }
-                (network_processor, cache)
-            })
-        };
-
-        NodeListener { network_cache_thread, cache_running, signal_receiver, handler }
+        //
+        NodeListener { network_processor_opt: Some(network_processor), signal_receiver, handler }
     }
 
     /// Iterate indefinitely over all generated `NetEvent`.
@@ -294,21 +189,8 @@ impl<S: Send + 'static> NodeListener<S> {
     /// // Blocked here until handler.stop() is called (1 sec).
     /// println!("Node is stopped");
     /// ```
-    pub fn for_each(mut self, mut event_callback: impl FnMut(NodeEvent<S>) + Send) {
-        // Stop cache events
-        self.cache_running.store(false, Ordering::Relaxed);
-        let (mut network_processor, mut cache) = self.network_cache_thread.join();
-
-        // Dispatch the catched events first.
-        while let Some(event) = cache.pop_front() {
-            let net_event = event.borrow();
-            log::trace!("Read from cache {:?}", net_event);
-            event_callback(NodeEvent::Network(net_event));
-            if !self.handler.is_running() {
-                return;
-            }
-        }
-
+    pub fn for_each(mut self, event_callback: impl FnMut(NodeEvent<S>) + Send) {
+        //
         crossbeam_utils::thread::scope(|scope| {
             let multiplexed = Arc::new(Mutex::new(event_callback));
 
@@ -349,6 +231,7 @@ impl<S: Send + 'static> NodeListener<S> {
                     .unwrap()
             };
 
+            let mut network_processor = self.network_processor_opt.take().unwrap();
             while self.handler.is_running() {
                 network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), |net_event| {
                     let mut event_callback = multiplexed.lock().expect(OTHER_THREAD_ERR);
@@ -398,10 +281,7 @@ impl<S: Send + 'static> NodeListener<S> {
         mut self,
         event_callback: impl FnMut(NodeEvent<S>) + Send + 'static,
     ) -> NodeTask {
-        // Stop cache events
-        self.cache_running.store(false, Ordering::Relaxed);
-        let (mut network_processor, mut cache) = self.network_cache_thread.join();
-
+        //
         let multiplexed = Arc::new(Mutex::new(event_callback));
 
         // To avoid processing stops while the node is configuring,
@@ -411,18 +291,11 @@ impl<S: Send + 'static> NodeListener<S> {
         let network_thread = {
             let multiplexed = multiplexed.clone();
             let handler = self.handler.clone();
+            let mut network_processor = self.network_processor_opt.take().unwrap();
 
+            //
             NamespacedThread::spawn("node-network-thread", move || {
-                while let Some(event) = cache.pop_front() {
-                    let net_event = event.borrow();
-                    log::trace!("Read from cache {:?}", net_event);
-                    let mut event_callback = multiplexed.lock().expect(OTHER_THREAD_ERR);
-                    event_callback(NodeEvent::Network(net_event));
-                    if !handler.is_running() {
-                        return;
-                    }
-                }
-
+                //
                 while handler.is_running() {
                     network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), |net_event| {
                         let mut event_callback = multiplexed.lock().expect(OTHER_THREAD_ERR);
@@ -453,44 +326,11 @@ impl<S: Send + 'static> NodeListener<S> {
 
         NodeTask { network_thread, signal_thread }
     }
-
-    /// Consumes the listener to create a `NodeTask` and an `EventReceiver` where the events
-    /// of this node will be sent.
-    /// The events will be sent to the `EventReceiver` during the `NodeTask` lifetime.
-    /// The aim of this method is to offer a synchronous way of working with a *node*,
-    /// without using a clousure.
-    /// This easier API management has a performance cost.
-    /// Compared to [`NodeListener::for_each()`], this function adds latency because the
-    /// node event must be copied and no longer reference data from the internal socket buffer.
-    ///
-    /// # Example
-    /// ```
-    /// use message_io::node::{self, StoredNodeEvent as NodeEvent};
-    /// use message_io::network::Transport;
-    ///
-    /// let (handler, listener) = node::split();
-    /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
-    /// let (id, addr) = handler.network().listen(Transport::FramedTcp, "127.0.0.1:0").unwrap();
-    ///
-    /// let (task, mut receiver) = listener.enqueue();
-    ///
-    /// loop {
-    ///     match receiver.receive() {
-    ///         NodeEvent::Network(net_event) => { /* Your logic here */ },
-    ///         NodeEvent::Signal(_) => break handler.stop(),
-    ///     }
-    /// }
-    /// ```
-    pub fn enqueue(self) -> (NodeTask, EventReceiver<StoredNodeEvent<S>>) {
-        let (sender, receiver) = events::split::<StoredNodeEvent<S>>();
-        let task = self.for_each_async(move |node_event| sender.send(node_event.into()));
-        (task, receiver)
-    }
 }
 
 impl<S: Send + 'static> Drop for NodeListener<S> {
     fn drop(&mut self) {
-        self.cache_running.store(false, Ordering::Relaxed);
+        //
     }
 }
 
@@ -519,7 +359,7 @@ impl NodeTask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration};
+    use std::time::Duration;
 
     #[test]
     fn create_node_and_drop() {
@@ -561,22 +401,6 @@ mod tests {
         assert!(checked.load(Ordering::Relaxed));
         assert!(handler.is_running());
         handler.signals().send("stop");
-    }
-
-    #[test]
-    fn enqueue() {
-        let (handler, listener) = split();
-        assert!(handler.is_running());
-        handler.signals().send_with_timer((), Duration::from_millis(1000));
-
-        let (mut task, mut receiver) = listener.enqueue();
-        assert!(handler.is_running());
-
-        receiver.receive_timeout(Duration::from_millis(2000)).unwrap().signal();
-        handler.stop();
-
-        assert!(!handler.is_running());
-        task.wait();
     }
 
     #[test]

@@ -1,6 +1,6 @@
 mod common;
-mod sender;
 mod receiver;
+mod sender;
 
 pub fn main() {
     let args: Vec<String> = std::env::args().collect();

@@ -1,11 +1,11 @@
-use super::common::{Message};
+use super::common::Message;
 
-use message_io::network::{NetEvent, Transport, Endpoint};
+use message_io::network::{Endpoint, NetEvent, Transport};
 use message_io::node::{self, NodeHandler, NodeListener};
 
-use std::net::{SocketAddr};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::io::{self};
+use std::net::SocketAddr;
 
 struct ParticipantInfo {
     addr: SocketAddr,
@@ -23,7 +23,7 @@ impl DiscoveryServer {
         let (handler, node_listener) = node::split::<()>();
 
         let listen_addr = "127.0.0.1:5000";
-        handler.network().listen(Transport::FramedTcp, listen_addr)?;
+        handler.network().listen(Transport::Tcp, listen_addr)?;
 
         println!("Discovery server running at {}", listen_addr);
 
@@ -40,7 +40,7 @@ impl DiscoveryServer {
             NetEvent::Connected(_, _) => unreachable!(), // There is no connect() calls.
             NetEvent::Accepted(_, _) => (),              // All endpoint accepted
             NetEvent::Message(endpoint, input_data) => {
-                let message: Message = bincode::deserialize(&input_data).unwrap();
+                let message: Message = bincode::deserialize(input_data.peek()).unwrap();
                 match message {
                     Message::RegisterParticipant(name, addr) => {
                         self.register(&name, addr, endpoint);
@@ -85,8 +85,7 @@ impl DiscoveryServer {
             // Register participant
             self.participants.insert(name.to_string(), ParticipantInfo { addr, endpoint });
             println!("Added participant '{}' with ip {}", name, addr);
-        }
-        else {
+        } else {
             println!(
                 "Participant with name '{}' already exists, please registry with another name",
                 name
@@ -103,8 +102,7 @@ impl DiscoveryServer {
                 self.handler.network().send(participant.1.endpoint, &output_data);
             }
             println!("Removed participant '{}' with ip {}", name, info.addr);
-        }
-        else {
+        } else {
             println!("Can not unregister an non-existent participant with name '{}'", name);
         }
     }

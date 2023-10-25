@@ -1,6 +1,6 @@
-use super::resource_id::{ResourceId};
+use super::resource_id::ResourceId;
 
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 
 /// Information to identify the remote endpoint.
 /// The endpoint is used mainly as a connection identified.
@@ -81,19 +81,5 @@ impl Endpoint {
 impl std::fmt::Display for Endpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{} {}", self.resource_id, self.addr)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::network::resource_id::{ResourceType, ResourceIdGenerator};
-    use crate::network::transport::{Transport};
-
-    #[test]
-    fn from_local_non_connection_oriented() {
-        let addr = "0.0.0.0:0".parse().unwrap();
-        let generator = ResourceIdGenerator::new(Transport::Udp.id(), ResourceType::Local);
-        Endpoint::from_listener(generator.generate(), addr);
     }
 }

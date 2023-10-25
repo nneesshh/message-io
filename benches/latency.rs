@@ -146,23 +146,11 @@ fn latency_by_native_web_socket(c: &mut Criterion) {
 }
 
 fn latency(c: &mut Criterion) {
-    #[cfg(feature = "udp")]
-    latency_by(c, Transport::Udp);
     #[cfg(feature = "tcp")]
     latency_by(c, Transport::Tcp);
-    #[cfg(feature = "tcp")]
-    latency_by(c, Transport::FramedTcp);
-    #[cfg(feature = "websocket")]
-    latency_by(c, Transport::Ws);
 
-    #[cfg(feature = "udp")]
-    latency_by_native_udp(c);
     #[cfg(feature = "tcp")]
     latency_by_native_tcp(c);
-    #[cfg(feature = "tcp")]
-    latency_by_native_framed_tcp(c);
-    #[cfg(feature = "websocket")]
-    latency_by_native_web_socket(c);
 }
 
 criterion_group!(benches, latency);

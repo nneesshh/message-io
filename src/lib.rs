@@ -21,3 +21,6 @@ pub mod events;
 
 /// General purpose utilities.
 pub mod util;
+
+/// Memory pool for net io buffer
+pub mod net_packet;

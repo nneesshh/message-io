@@ -1,11 +1,11 @@
-mod resource_id;
+mod driver;
 mod endpoint;
+mod loader;
 mod poll;
 mod registry;
-mod driver;
 mod remote_addr;
+mod resource_id;
 mod transport;
-mod loader;
 
 /// Module that specify the pattern to follow to create adapters.
 /// This module is not part of the public API itself,
@@ -13,22 +13,22 @@ mod loader;
 pub mod adapter;
 
 // Reexports
-pub use adapter::{SendStatus};
-pub use resource_id::{ResourceId, ResourceType};
-pub use endpoint::{Endpoint};
+pub use adapter::SendStatus;
+pub use driver::NetEvent;
+pub use endpoint::Endpoint;
+pub use poll::Readiness;
 pub use remote_addr::{RemoteAddr, ToRemoteAddr};
+pub use resource_id::{ResourceId, ResourceType};
 pub use transport::{Transport, TransportConnect, TransportListen};
-pub use driver::{NetEvent};
-pub use poll::{Readiness};
 
-use loader::{DriverLoader, ActionControllerList, EventProcessorList};
+use loader::{ActionControllerList, DriverLoader, EventProcessorList};
 use poll::{Poll, PollEvent};
 
-use strum::{IntoEnumIterator};
+use strum::IntoEnumIterator;
 
+use std::io::{self};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
-use std::io::{self};
 
 /// Create a network instance giving its controller and processor.
 pub fn split() -> (NetworkController, NetworkProcessor) {
@@ -361,7 +361,7 @@ impl NetworkProcessor {
     pub fn process_poll_event(
         &mut self,
         timeout: Option<Duration>,
-        mut event_callback: impl FnMut(NetEvent<'_>),
+        mut event_callback: impl FnMut(NetEvent),
     ) {
         let processors = &mut self.processors;
         self.poll.process_event(timeout, |poll_event| {
@@ -385,7 +385,7 @@ impl NetworkProcessor {
     pub fn process_poll_events_until_timeout(
         &mut self,
         timeout: Duration,
-        mut event_callback: impl FnMut(NetEvent<'_>),
+        mut event_callback: impl FnMut(NetEvent),
     ) {
         loop {
             let now = Instant::now();
@@ -400,8 +400,8 @@ impl NetworkProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration};
-    use crate::util::thread::{NamespacedThread};
+    use crate::util::thread::NamespacedThread;
+    use std::time::Duration;
 
     use test_case::test_case;
 
@@ -411,8 +411,6 @@ mod tests {
     }
 
     #[cfg_attr(feature = "tcp", test_case(Transport::Tcp))]
-    #[cfg_attr(feature = "tcp", test_case(Transport::FramedTcp))]
-    #[cfg_attr(feature = "websocket", test_case(Transport::Ws))]
     fn successful_connection(transport: Transport) {
         let (controller, mut processor) = self::split();
         let (listener_id, addr) = controller.listen(transport, "127.0.0.1:0").unwrap();
@@ -437,8 +435,6 @@ mod tests {
     }
 
     #[cfg_attr(feature = "tcp", test_case(Transport::Tcp))]
-    #[cfg_attr(feature = "tcp", test_case(Transport::FramedTcp))]
-    #[cfg_attr(feature = "websocket", test_case(Transport::Ws))]
     fn successful_connection_sync(transport: Transport) {
         let (controller, mut processor) = self::split();
         let (_, addr) = controller.listen(transport, "127.0.0.1:0").unwrap();
@@ -454,8 +450,6 @@ mod tests {
     }
 
     #[cfg_attr(feature = "tcp", test_case(Transport::Tcp))]
-    #[cfg_attr(feature = "tcp", test_case(Transport::FramedTcp))]
-    #[cfg_attr(feature = "websocket", test_case(Transport::Ws))]
     fn unreachable_connection(transport: Transport) {
         let (controller, mut processor) = self::split();
 
@@ -483,8 +477,6 @@ mod tests {
     }
 
     #[cfg_attr(feature = "tcp", test_case(Transport::Tcp))]
-    #[cfg_attr(feature = "tcp", test_case(Transport::FramedTcp))]
-    #[cfg_attr(feature = "websocket", test_case(Transport::Ws))]
     fn unreachable_connection_sync(transport: Transport) {
         let (controller, mut processor) = self::split();
 

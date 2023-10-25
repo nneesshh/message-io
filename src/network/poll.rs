@@ -1,13 +1,13 @@
 use super::resource_id::{
-    RESERVED_BYTES_MASK, RESERVED_BYTES_POS, ResourceId, ResourceType, ResourceIdGenerator,
+    ResourceId, ResourceIdGenerator, ResourceType, RESERVED_BYTES_MASK, RESERVED_BYTES_POS,
 };
 
-use mio::{Poll as MioPoll, Interest, Token, Events, Registry, Waker};
-use mio::event::{Source};
+use mio::event::Source;
+use mio::{Events, Interest, Poll as MioPoll, Registry, Token, Waker};
 
-use std::time::{Duration};
-use std::sync::{Arc};
-use std::io::{ErrorKind};
+use std::io::ErrorKind;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Used for the adapter implementation.

@@ -1,11 +1,11 @@
-use super::common::{Message};
+use super::common::Message;
 
-use message_io::network::{NetEvent, Transport, Endpoint};
+use message_io::network::{Endpoint, NetEvent, Transport};
 use message_io::node::{self, NodeHandler, NodeListener};
 
-use std::net::{SocketAddr};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::io::{self};
+use std::net::SocketAddr;
 
 pub struct Participant {
     handler: NodeHandler<()>,
@@ -24,10 +24,10 @@ impl Participant {
         // A node_listener for any other participant that want to establish connection.
         // Returned 'listen_addr' contains the port that the OS gives for us when we put a 0.
         let listen_addr = "127.0.0.1:0";
-        let (_, listen_addr) = handler.network().listen(Transport::FramedTcp, listen_addr)?;
+        let (_, listen_addr) = handler.network().listen(Transport::Tcp, listen_addr)?;
 
         let discovery_addr = "127.0.0.1:5000"; // Connection to the discovery server.
-        let (endpoint, _) = handler.network().connect(Transport::FramedTcp, discovery_addr)?;
+        let (endpoint, _) = handler.network().connect(Transport::Tcp, discovery_addr)?;
 
         Ok(Participant {
             handler,
@@ -51,12 +51,10 @@ impl Participant {
                             Message::RegisterParticipant(self.name.clone(), self.public_addr);
                         let output_data = bincode::serialize(&message).unwrap();
                         self.handler.network().send(self.discovery_endpoint, &output_data);
-                    }
-                    else {
+                    } else {
                         println!("Can not connect to the discovery server");
                     }
-                }
-                else {
+                } else {
                     // Participant endpoint
                     let (name, message) = self.greetings.remove(&endpoint).unwrap();
                     if established {
@@ -70,7 +68,7 @@ impl Participant {
             }
             NetEvent::Accepted(_, _) => (),
             NetEvent::Message(_, input_data) => {
-                let message: Message = bincode::deserialize(&input_data).unwrap();
+                let message: Message = bincode::deserialize(input_data.peek()).unwrap();
                 match message {
                     Message::ParticipantList(participants) => {
                         println!("Participant list received ({} participants)", participants.len());
@@ -105,7 +103,7 @@ impl Participant {
     }
 
     fn discovered_participant(&mut self, name: &str, addr: SocketAddr, text: &str) {
-        let (endpoint, _) = self.handler.network().connect(Transport::FramedTcp, addr).unwrap();
+        let (endpoint, _) = self.handler.network().connect(Transport::Tcp, addr).unwrap();
         // Save the necessary info to send the message when the connection is established.
         self.greetings.insert(endpoint, (name.into(), text.into()));
     }

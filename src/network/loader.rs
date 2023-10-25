@@ -1,15 +1,15 @@
 use crate::network::{TransportConnect, TransportListen};
 
-use super::endpoint::{Endpoint};
-use super::resource_id::{ResourceId};
-use super::poll::{Poll, Readiness};
-use super::remote_addr::{RemoteAddr};
-use super::driver::{NetEvent, Driver, ActionController, EventProcessor};
 use super::adapter::{Adapter, SendStatus};
+use super::driver::{ActionController, Driver, EventProcessor, NetEvent};
+use super::endpoint::Endpoint;
+use super::poll::{Poll, Readiness};
+use super::remote_addr::RemoteAddr;
+use super::resource_id::ResourceId;
 
-use std::net::{SocketAddr};
 use std::io::{self};
-use std::panic::{UnwindSafe};
+use std::net::SocketAddr;
+use std::panic::UnwindSafe;
 
 type Controller = Box<dyn ActionController + Send + UnwindSafe>;
 type Processor = Box<dyn EventProcessor + Send + UnwindSafe>;
@@ -94,7 +94,7 @@ impl ActionController for UnimplementedDriver {
 }
 
 impl EventProcessor for UnimplementedDriver {
-    fn process(&self, _: ResourceId, _: Readiness, _: &mut dyn FnMut(NetEvent<'_>)) {
+    fn process(&self, _: ResourceId, _: Readiness, _: &mut dyn FnMut(NetEvent)) {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
 }

@@ -1,10 +1,10 @@
-use super::common::{FromServerMessage, FromClientMessage};
+use super::common::{FromClientMessage, FromServerMessage};
 
-use message_io::network::{NetEvent, Transport, Endpoint};
+use message_io::network::{Endpoint, NetEvent, Transport};
 use message_io::node::{self};
 
-use std::collections::{HashMap};
-use std::net::{SocketAddr};
+use std::collections::HashMap;
+use std::net::SocketAddr;
 
 struct ClientInfo {
     count: usize,
@@ -28,7 +28,7 @@ pub fn run(transport: Transport, addr: SocketAddr) {
             println!("Client ({}) connected (total clients: {})", endpoint.addr(), clients.len());
         }
         NetEvent::Message(endpoint, input_data) => {
-            let message: FromClientMessage = bincode::deserialize(&input_data).unwrap();
+            let message: FromClientMessage = bincode::deserialize(input_data.peek()).unwrap();
             match message {
                 FromClientMessage::Ping => {
                     let message = match clients.get_mut(&endpoint) {

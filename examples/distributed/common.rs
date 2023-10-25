@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 
 #[derive(Serialize, Deserialize)]
 

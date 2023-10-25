@@ -1,9 +1,9 @@
-use super::common::{FromServerMessage, FromClientMessage};
+use super::common::{FromClientMessage, FromServerMessage};
 
-use message_io::network::{NetEvent, Transport, RemoteAddr};
+use message_io::network::{NetEvent, RemoteAddr, Transport};
 use message_io::node::{self, NodeEvent};
 
-use std::time::{Duration};
+use std::time::Duration;
 
 enum Signal {
     Greet, // This is a self event called every second.
@@ -23,14 +23,13 @@ pub fn run(transport: Transport, remote_addr: RemoteAddr) {
                     println!("Connected to server at {} by {}", server_id.addr(), transport);
                     println!("Client identified by local port: {}", local_addr.port());
                     handler.signals().send(Signal::Greet);
-                }
-                else {
+                } else {
                     println!("Can not connect to server at {} by {}", remote_addr, transport)
                 }
             }
             NetEvent::Accepted(_, _) => unreachable!(), // Only generated when a listener accepts
             NetEvent::Message(_, input_data) => {
-                let message: FromServerMessage = bincode::deserialize(&input_data).unwrap();
+                let message: FromServerMessage = bincode::deserialize(input_data.peek()).unwrap();
                 match message {
                     FromServerMessage::Pong(count) => {
                         println!("Pong from server: {} times", count)
