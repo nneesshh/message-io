@@ -116,6 +116,7 @@ impl Remote for RemoteResource {
             Some(Protocol::TCP),
         )?;
         socket.set_nonblocking(true)?;
+        socket.set_nodelay(true)?;
 
         if let Some(source_address) = config.source_address {
             socket.bind(&source_address.into())?;
@@ -279,6 +280,7 @@ impl Local for LocalResource {
             Some(Protocol::TCP),
         )?;
         socket.set_nonblocking(true)?;
+        socket.set_nodelay(true)?;
         socket.set_reuse_address(true)?;
 
         #[cfg(unix)]

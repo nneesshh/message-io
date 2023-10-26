@@ -11,6 +11,7 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
+    /*
     /// Creates a new Endpoint to use in non connection oriented protocols.
     ///
     /// For non connection-oriented protocols, as *UDP*, the endpoint can be created manually
@@ -60,6 +61,8 @@ impl Endpoint {
 
         Endpoint::new(id, addr)
     }
+
+     */
 
     pub fn new(resource_id: ResourceId, addr: SocketAddr) -> Self {
         Self { resource_id, addr }

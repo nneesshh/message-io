@@ -72,8 +72,8 @@ impl NetworkController {
     /// let (handler, listener) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
     ///
-    /// let (id, addr) = handler.network().listen(Transport::FramedTcp, "127.0.0.1:0").unwrap();
-    /// let (conn_endpoint, _) = handler.network().connect(Transport::FramedTcp, addr).unwrap();
+    /// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
+    /// let (conn_endpoint, _) = handler.network().connect(Transport::Tcp, addr).unwrap();
     /// // The socket could not be able to send yet.
     ///
     /// listener.for_each(move |event| match event {
@@ -121,14 +121,14 @@ impl NetworkController {
     /// ```
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::{TransportConnect, NetEvent};
-    /// use message_io::adapters::udp::{UdpConnectConfig};
+    /// use message_io::adapters::tcp::{TcpConnectConfig};
     ///
     /// let (handler, listener) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
     ///
-    /// let config = UdpConnectConfig::default().with_broadcast();
-    /// let addr = "255.255.255.255:7777";
-    /// let (conn_endpoint, _) = handler.network().connect_with(TransportConnect::Udp(config), addr).unwrap();
+    /// let config = TcpConnectConfig::default();
+    /// let addr = "127.0.0.1:7878";
+    /// let (conn_endpoint, _) = handler.network().connect_with(TransportConnect::Tcp(config), addr).unwrap();
     /// // The socket could not be able to send yet.
     ///
     /// listener.for_each(move |event| match event {
@@ -176,15 +176,18 @@ impl NetworkController {
     /// [`NetworkController::connect()`] version.
     ///
     /// Example
-    /// ```
+    /// ```rust,no_run
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::{Transport, NetEvent};
     ///
     /// let (handler, listener) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
     ///
-    /// let (id, addr) = handler.network().listen(Transport::FramedTcp, "127.0.0.1:0").unwrap();
-    /// match handler.network().connect_sync(Transport::FramedTcp, addr) {
+    /// // poll network event
+    /// let _node_task = listener.for_each_async(move |_event| {});
+    ///
+    /// let (_, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
+    /// match handler.network().connect_sync(Transport::Tcp, addr) {
     ///     Ok((endpoint, _)) => {
     ///         println!("Connected!");
     ///         handler.network().send(endpoint, &[42]);
@@ -218,17 +221,20 @@ impl NetworkController {
     /// [`NetworkController::connect_with()`] version.
     ///
     /// Example
-    /// ```
+    /// ```rust,no_run
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::{TransportConnect, NetEvent};
-    /// use message_io::adapters::udp::{UdpConnectConfig};
+    /// use message_io::adapters::tcp::{TcpConnectConfig};
     ///
     /// let (handler, listener) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
     ///
-    /// let config = UdpConnectConfig::default().with_broadcast();
-    /// let addr = "255.255.255.255:7777";
-    /// match handler.network().connect_sync_with(TransportConnect::Udp(config), addr) {
+    /// // poll network event
+    /// let _node_task = listener.for_each_async(move |_event| {});
+    ///
+    /// let config = TcpConnectConfig::default();
+    /// let addr = "127.0.0.1:7878";
+    /// match handler.network().connect_sync_with(TransportConnect::Tcp(config), addr) {
     ///     Ok((endpoint, _)) => {
     ///         println!("Connected!");
     ///         handler.network().send(endpoint, &[42]);

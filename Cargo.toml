@@ -35,7 +35,7 @@ integer-encoding = "3"
 lazy_static = "1"
 bytemuck = { path = "../bytemuck", features = ["derive"] }
 bytes = { path = "../bytes", default-features = false }
-net_packet = { path = "../net_packet" }
+net_packet = { path = "../net_packet-rs" }
 opool = { path = "../opool" }
 tungstenite = { path = "../tungstenite-rs", optional = true }
 

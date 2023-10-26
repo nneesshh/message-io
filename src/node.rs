@@ -180,7 +180,7 @@ impl<S: Send + 'static> NodeListener<S> {
     ///
     /// let (handler, listener) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
-    /// let (id, addr) = handler.network().listen(Transport::FramedTcp, "127.0.0.1:0").unwrap();
+    /// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
     ///
     /// listener.for_each(move |event| match event {
     ///     NodeEvent::Network(net_event) => { /* Your logic here */ },
@@ -260,7 +260,7 @@ impl<S: Send + 'static> NodeListener<S> {
     ///
     /// let (handler, listener) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
-    /// let (id, addr) = handler.network().listen(Transport::FramedTcp, "127.0.0.1:0").unwrap();
+    /// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
     ///
     /// let task = listener.for_each_async(move |event| match event {
     ///      NodeEvent::Network(net_event) => { /* Your logic here */ },
