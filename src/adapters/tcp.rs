@@ -213,7 +213,7 @@ impl Remote for RemoteResource {
         }
     }
 
-    fn pending(&self, _readiness: Readiness) -> PendingStatus {
+    fn pending(&self) -> PendingStatus {
         let status = check_tcp_stream_ready(&self.stream);
 
         if status == PendingStatus::Ready {
