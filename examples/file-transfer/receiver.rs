@@ -3,7 +3,7 @@ use super::common::{ReceiverMsg, SenderMsg};
 use message_io::network::{Endpoint, NetEvent, Transport};
 use message_io::node::{self};
 
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::fs::File;
 use std::io::Write;
 

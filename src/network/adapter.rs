@@ -2,7 +2,6 @@ use net_packet::NetPacketGuard;
 
 use crate::network::transport::{TransportConnect, TransportListen};
 
-use super::poll::Readiness;
 use super::remote_addr::RemoteAddr;
 
 use mio::event::Source;
@@ -162,7 +161,7 @@ pub trait Remote: Resource + Sized {
     /// `PendingStatus::Ready`.
     /// The method wil be called several times with different `Readiness` until the **implementator**
     /// returns a `PendingStatus::Ready` or `PendingStatus::Disconnected`.
-    fn pending(&self, readiness: Readiness) -> PendingStatus;
+    fn pending(&self) -> PendingStatus;
 
     /// The resource is available to write.
     /// It must be *ready* to receive this call.
@@ -170,6 +169,7 @@ pub trait Remote: Resource + Sized {
     /// The return value is an identification of the operation result.
     /// If the method returns `true`, the operation was successful, otherwise, the resource will
     /// be disconnected and removed.
+    #[inline(always)]
     fn ready_to_write(&self) -> bool {
         true
     }

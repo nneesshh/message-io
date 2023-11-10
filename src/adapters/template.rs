@@ -6,7 +6,7 @@ use crate::network::adapter::{
     AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
     Resource, SendStatus,
 };
-use crate::network::{Readiness, RemoteAddr, TransportConnect, TransportListen};
+use crate::network::{RemoteAddr, TransportConnect, TransportListen};
 
 use mio::event::Source;
 
@@ -42,7 +42,7 @@ impl Remote for RemoteResource {
         todo!()
     }
 
-    fn pending(&self, _readiness: Readiness) -> PendingStatus {
+    fn pending(&self) -> PendingStatus {
         todo!()
     }
 }

@@ -4,9 +4,8 @@ use crate::network::adapter::{
     AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
     Resource, SendStatus,
 };
-use crate::network::{Readiness, RemoteAddr};
+use crate::network::RemoteAddr;
 use crate::network::{TransportConnect, TransportListen};
-use crate::util::thread::OTHER_THREAD_ERR;
 
 use mio::event::Source;
 use mio::net::{TcpListener, TcpStream};
@@ -23,16 +22,18 @@ use tungstenite::protocol::{Message, WebSocket};
 
 use url::Url;
 
+use parking_lot::Mutex;
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Max message size for default config
 // From https://docs.rs/tungstenite/0.13.0/src/tungstenite/protocol/mod.rs.html#65
 pub const MAX_PAYLOAD_LEN: usize = 32 << 20;
 
 pub(crate) struct WsAdapter;
+
 impl Adapter for WsAdapter {
     type Remote = RemoteResource;
     type Local = LocalResource;
@@ -58,7 +59,7 @@ pub(crate) struct RemoteResource {
 
 impl Resource for RemoteResource {
     fn source(&mut self) -> &mut dyn Source {
-        match self.state.get_mut().unwrap() {
+        match self.state.get_mut() {
             RemoteState::WebSocket(web_socket) => {
                 Arc::get_mut(&mut web_socket.get_mut().0).unwrap()
             }
@@ -118,7 +119,7 @@ impl Remote for RemoteResource {
     fn receive(&self, mut process_data: impl FnMut(NetPacketGuard)) -> ReadStatus {
         loop {
             // "emulates" full duplex for the websocket case locking here and not outside the loop.
-            let mut state = self.state.lock().expect(OTHER_THREAD_ERR);
+            let mut state = self.state.lock();
             let deref_state = state.deref_mut();
             match deref_state {
                 RemoteState::WebSocket(web_socket) => match web_socket.read() {
@@ -163,7 +164,7 @@ impl Remote for RemoteResource {
     }
 
     fn send(&self, data: &[u8]) -> SendStatus {
-        let mut state = self.state.lock().expect(OTHER_THREAD_ERR);
+        let mut state = self.state.lock();
         let deref_state = state.deref_mut();
         match deref_state {
             RemoteState::WebSocket(web_socket) => {
@@ -188,14 +189,14 @@ impl Remote for RemoteResource {
         }
     }
 
-    fn pending(&self, _readiness: Readiness) -> PendingStatus {
-        let mut state = self.state.lock().expect(OTHER_THREAD_ERR);
+    fn pending(&self) -> PendingStatus {
+        let mut state = self.state.lock();
         let deref_state = state.deref_mut();
         match deref_state {
             RemoteState::WebSocket(_) => PendingStatus::Ready,
             RemoteState::Handshake(pending) => match pending.take().unwrap() {
                 PendingHandshake::Connect(url, stream) => {
-                    let tcp_status = super::tcp::check_stream_ready(&stream.0);
+                    let tcp_status = super::tcp::check_tcp_stream_ready(&stream.0);
                     if tcp_status != PendingStatus::Ready {
                         // TCP handshake not ready yet.
                         *pending = Some(PendingHandshake::Connect(url, stream));

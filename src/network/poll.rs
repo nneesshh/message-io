@@ -9,19 +9,9 @@ use std::io::ErrorKind;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-/// Used for the adapter implementation.
-/// Specify the kind of event that is available for a resource.
-pub enum Readiness {
-    /// The resource is available to write
-    Write,
-
-    /// The resource is available to read (has any content to read).
-    Read,
-}
-
 pub enum PollEvent {
-    Network(ResourceId, Readiness),
+    NetworkRead(ResourceId),
+    NetworkWrite(ResourceId),
     Waker,
 }
 
@@ -74,18 +64,24 @@ impl Poll {
                             let id = ResourceId::from(mio_event.token());
                             if mio_event.is_readable() {
                                 log::trace!("POLL EVENT (R): {}", id);
-                                event_callback(PollEvent::Network(id, Readiness::Read));
+                                event_callback(PollEvent::NetworkRead(id));
                             }
                             if mio_event.is_writable() {
                                 log::trace!("POLL EVENT (W): {}", id);
-                                event_callback(PollEvent::Network(id, Readiness::Write));
+                                event_callback(PollEvent::NetworkWrite(id));
                             }
                         }
                     }
                     break;
                 }
-                Err(ref err) if err.kind() == ErrorKind::Interrupted => continue,
-                Err(ref err) => Err(err).expect("No error here"),
+                Err(ref err) if err.kind() == ErrorKind::Interrupted => {
+                    //
+                    continue;
+                }
+                Err(ref err) => {
+                    //
+                    Err(err).expect("No error here")
+                }
             }
         }
     }

@@ -2,8 +2,8 @@ use net_packet::{take_small_packet, NetPacketGuard};
 
 use super::adapter::{AcceptedType, Adapter, Local, PendingStatus, ReadStatus, Remote, SendStatus};
 use super::endpoint::Endpoint;
-use super::poll::{Poll, Readiness};
-use super::registry::{Register, ResourceRegistry};
+use super::poll::Poll;
+use super::registry::{Register, SafeResourceRegistry};
 use super::remote_addr::RemoteAddr;
 use super::resource_id::{ResourceId, ResourceType};
 use super::transport::{TransportConnect, TransportListen};
@@ -89,7 +89,8 @@ pub trait ActionController: Send + Sync {
 }
 
 pub trait EventProcessor: Send + Sync {
-    fn process(&self, id: ResourceId, readiness: Readiness, callback: &mut dyn FnMut(NetEvent));
+    fn process_read(&self, id: ResourceId, callback: &mut dyn FnMut(NetEvent));
+    fn process_write(&self, id: ResourceId, callback: &mut dyn FnMut(NetEvent));
 }
 
 struct RemoteProperties {
@@ -115,8 +116,8 @@ impl RemoteProperties {
 struct LocalProperties;
 
 pub struct Driver<R: Remote, L: Local> {
-    remote_registry: Arc<ResourceRegistry<R, RemoteProperties>>,
-    local_registry: Arc<ResourceRegistry<L, LocalProperties>>,
+    remote_registry: SafeResourceRegistry<R, RemoteProperties>,
+    local_registry: SafeResourceRegistry<L, LocalProperties>,
 }
 
 impl<R: Remote, L: Local> Driver<R, L> {
@@ -129,12 +130,8 @@ impl<R: Remote, L: Local> Driver<R, L> {
         let local_poll_registry = poll.create_registry(adapter_id, ResourceType::Local);
 
         Driver {
-            remote_registry: Arc::new(ResourceRegistry::<R, RemoteProperties>::new(
-                remote_poll_registry,
-            )),
-            local_registry: Arc::new(ResourceRegistry::<L, LocalProperties>::new(
-                local_poll_registry,
-            )),
+            remote_registry: SafeResourceRegistry::<R, RemoteProperties>::new(remote_poll_registry),
+            local_registry: SafeResourceRegistry::<L, LocalProperties>::new(local_poll_registry),
         }
     }
 }
@@ -177,17 +174,27 @@ impl<R: Remote, L: Local> ActionController for Driver<R, L> {
 
     fn send(&self, endpoint: Endpoint, data: &[u8]) -> SendStatus {
         match endpoint.resource_id().resource_type() {
-            ResourceType::Remote => match self.remote_registry.get(endpoint.resource_id()) {
-                Some(remote) => match remote.properties.is_ready() {
-                    true => remote.resource.send(data),
-                    false => SendStatus::ResourceNotAvailable,
-                },
-                None => SendStatus::ResourceNotFound,
-            },
-            ResourceType::Local => match self.local_registry.get(endpoint.resource_id()) {
-                Some(remote) => remote.resource.send_to(endpoint.addr(), data),
-                None => SendStatus::ResourceNotFound,
-            },
+            ResourceType::Remote => {
+                //
+                match self.remote_registry.get(endpoint.resource_id()) {
+                    Some(ref mut remote) => {
+                        //
+                        if remote.properties.is_ready() {
+                            remote.resource.send(data)
+                        } else {
+                            SendStatus::ResourceNotAvailable
+                        }
+                    }
+                    None => SendStatus::ResourceNotFound,
+                }
+            }
+            ResourceType::Local => {
+                //
+                match self.local_registry.get(endpoint.resource_id()) {
+                    Some(remote) => remote.resource.send_to(endpoint.addr(), data),
+                    None => SendStatus::ResourceNotFound,
+                }
+            }
         }
     }
 
@@ -207,43 +214,62 @@ impl<R: Remote, L: Local> ActionController for Driver<R, L> {
 }
 
 impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
-    fn process(
-        &self,
-        id: ResourceId,
-        readiness: Readiness,
-        event_callback: &mut dyn FnMut(NetEvent),
-    ) {
+    fn process_read(&self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
         match id.resource_type() {
             ResourceType::Remote => {
-                if let Some(remote) = self.remote_registry.get(id) {
+                if let Some(ref mut remote) = self.remote_registry.get(id) {
                     let endpoint = Endpoint::new(id, remote.properties.peer_addr);
                     log::trace!("Processed remote for {}", endpoint);
 
+                    //
                     if !remote.properties.is_ready() {
-                        self.resolve_pending_remote(&remote, endpoint, readiness, |e| {
-                            event_callback(e)
+                        self.resolve_pending_remote(remote, endpoint, |e| {
+                            //
+                            event_callback(e);
                         });
                     }
+
+                    //
                     if remote.properties.is_ready() {
-                        match readiness {
-                            Readiness::Write => {
-                                self.write_to_remote(&remote, endpoint, event_callback);
-                            }
-                            Readiness::Read => {
-                                self.read_from_remote(&remote, endpoint, event_callback);
-                            }
-                        }
+                        //
+                        self.read_from_remote(remote, endpoint, event_callback);
                     }
                 }
             }
             ResourceType::Local => {
-                if let Some(local) = self.local_registry.get(id) {
+                if let Some(ref mut local) = self.local_registry.get(id) {
                     log::trace!("Processed local for {}", id);
-                    match readiness {
-                        Readiness::Write => (),
-                        Readiness::Read => self.read_from_local(&local, id, event_callback),
+
+                    //
+                    self.read_from_local(local, id, event_callback)
+                }
+            }
+        }
+    }
+    fn process_write(&self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
+        match id.resource_type() {
+            ResourceType::Remote => {
+                if let Some(ref mut remote) = self.remote_registry.get(id) {
+                    let endpoint = Endpoint::new(id, remote.properties.peer_addr);
+                    log::trace!("Processed remote for {}", endpoint);
+
+                    //
+                    if !remote.properties.is_ready() {
+                        self.resolve_pending_remote(remote, endpoint, |e| {
+                            //
+                            event_callback(e);
+                        });
+                    }
+
+                    //
+                    if remote.properties.is_ready() {
+                        //
+                        self.write_to_remote(remote, endpoint, event_callback);
                     }
                 }
+            }
+            ResourceType::Local => {
+                // do nothing
             }
         }
     }
@@ -254,10 +280,9 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         &self,
         remote: &Arc<Register<R, RemoteProperties>>,
         endpoint: Endpoint,
-        readiness: Readiness,
         mut event_callback: impl FnMut(NetEvent),
     ) {
-        let status = remote.resource.pending(readiness);
+        let status = remote.resource.pending();
         log::trace!("Resolve pending for {}: {:?}", endpoint, status);
         match status {
             PendingStatus::Ready => {
@@ -313,7 +338,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         mut event_callback: impl FnMut(NetEvent),
     ) {
         local.resource.accept(|accepted| {
-            log::trace!("Accepted type: {}", accepted);
+            //log::trace!("Accepted type: {}", accepted);
             match accepted {
                 AcceptedType::Remote(addr, remote) => {
                     self.remote_registry.register(

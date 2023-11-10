@@ -1,15 +1,16 @@
 use crate::events::{self, EventReceiver, EventSender};
 use crate::network::{self, NetEvent, NetworkController, NetworkProcessor};
-use crate::util::thread::{NamespacedThread, OTHER_THREAD_ERR};
+use crate::util::thread::NamespacedThread;
 
+use parking_lot::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 use std::time::Duration;
 
 lazy_static::lazy_static! {
-    static ref SAMPLING_TIMEOUT: Duration = Duration::from_millis(50);
+    static ref SAMPLING_TIMEOUT: Duration = Duration::from_millis(5);
 }
 
 /// Event returned by [`NodeListener::for_each()`] and [`NodeListener::for_each_async()`]
@@ -220,8 +221,7 @@ impl<S: Send + 'static> NodeListener<S> {
                         while handler.is_running() {
                             if let Some(signal) = signal_receiver.receive_timeout(*SAMPLING_TIMEOUT)
                             {
-                                let mut event_callback =
-                                    multiplexed.0.lock().expect(OTHER_THREAD_ERR);
+                                let mut event_callback = multiplexed.0.lock();
                                 if handler.is_running() {
                                     event_callback(NodeEvent::Signal(signal));
                                 }
@@ -234,7 +234,7 @@ impl<S: Send + 'static> NodeListener<S> {
             let mut network_processor = self.network_processor_opt.take().unwrap();
             while self.handler.is_running() {
                 network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), |net_event| {
-                    let mut event_callback = multiplexed.lock().expect(OTHER_THREAD_ERR);
+                    let mut event_callback = multiplexed.lock();
                     if self.handler.is_running() {
                         event_callback(NodeEvent::Network(net_event));
                     }
@@ -286,7 +286,7 @@ impl<S: Send + 'static> NodeListener<S> {
 
         // To avoid processing stops while the node is configuring,
         // the user callback locked until the function ends.
-        let _locked = multiplexed.lock().expect(OTHER_THREAD_ERR);
+        let _locked = multiplexed.lock();
 
         let network_thread = {
             let multiplexed = multiplexed.clone();
@@ -298,7 +298,7 @@ impl<S: Send + 'static> NodeListener<S> {
                 //
                 while handler.is_running() {
                     network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), |net_event| {
-                        let mut event_callback = multiplexed.lock().expect(OTHER_THREAD_ERR);
+                        let mut event_callback = multiplexed.lock();
                         if handler.is_running() {
                             event_callback(NodeEvent::Network(net_event));
                         }
@@ -315,7 +315,7 @@ impl<S: Send + 'static> NodeListener<S> {
             NamespacedThread::spawn("node-signal-thread", move || {
                 while handler.is_running() {
                     if let Some(signal) = signal_receiver.receive_timeout(*SAMPLING_TIMEOUT) {
-                        let mut event_callback = multiplexed.lock().expect(OTHER_THREAD_ERR);
+                        let mut event_callback = multiplexed.lock();
                         if handler.is_running() {
                             event_callback(NodeEvent::Signal(signal));
                         }

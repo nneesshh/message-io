@@ -16,7 +16,6 @@ pub mod adapter;
 pub use adapter::SendStatus;
 pub use driver::NetEvent;
 pub use endpoint::Endpoint;
-pub use poll::Readiness;
 pub use remote_addr::{RemoteAddr, ToRemoteAddr};
 pub use resource_id::{ResourceId, ResourceType};
 pub use transport::{Transport, TransportConnect, TransportListen};
@@ -372,9 +371,17 @@ impl NetworkProcessor {
         let processors = &mut self.processors;
         self.poll.process_event(timeout, |poll_event| {
             match poll_event {
-                PollEvent::Network(resource_id, interest) => {
+                PollEvent::NetworkRead(resource_id) => {
                     let processor = &processors[resource_id.adapter_id() as usize];
-                    processor.process(resource_id, interest, &mut |net_event| {
+                    processor.process_read(resource_id, &mut |net_event| {
+                        log::trace!("Processed {:?}", net_event);
+                        event_callback(net_event);
+                    });
+                }
+
+                PollEvent::NetworkWrite(resource_id) => {
+                    let processor = &processors[resource_id.adapter_id() as usize];
+                    processor.process_write(resource_id, &mut |net_event| {
                         log::trace!("Processed {:?}", net_event);
                         event_callback(net_event);
                     });

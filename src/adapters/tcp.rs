@@ -6,7 +6,7 @@ use crate::network::adapter::{
     AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
     Resource, SendStatus,
 };
-use crate::network::{Readiness, RemoteAddr, TransportConnect, TransportListen};
+use crate::network::{RemoteAddr, TransportConnect, TransportListen};
 
 use mio::event::Source;
 use mio::net::{TcpListener, TcpStream};
@@ -190,7 +190,7 @@ impl Remote for RemoteResource {
         // TODO: The current implementation implies an active waiting,
         // improve it using POLLIN instead to avoid active waiting.
         // Note: Despite the fear that an active waiting could generate,
-        // this only occurs in the case when the receiver is full because reads slower that it sends.
+        // this only occurs in the case when the receiver is full because reads slower than it sends.
         let mut total_bytes_sent = 0;
         loop {
             let stream = &self.stream;
@@ -214,14 +214,12 @@ impl Remote for RemoteResource {
     }
 
     fn pending(&self, _readiness: Readiness) -> PendingStatus {
-        let status = check_stream_ready(&self.stream);
+        let status = check_tcp_stream_ready(&self.stream);
 
         if status == PendingStatus::Ready {
             if let Some(keepalive) = &self.keepalive {
-                #[cfg(target_os = "windows")]
-                let socket = unsafe { Socket::from_raw_socket(self.stream.as_raw_socket()) };
-                #[cfg(not(target_os = "windows"))]
-                let socket = unsafe { Socket::from_raw_fd(self.stream.as_raw_fd()) };
+                //
+                let socket = tcp_stream_to_socket(&self.stream);
 
                 if let Err(e) = socket.set_tcp_keepalive(keepalive) {
                     log::warn!("TCP set keepalive error: {}", e);
@@ -237,7 +235,7 @@ impl Remote for RemoteResource {
 }
 
 /// Check if a TcpStream can be considered connected.
-pub fn check_stream_ready(stream: &TcpStream) -> PendingStatus {
+pub fn check_tcp_stream_ready(stream: &TcpStream) -> PendingStatus {
     // A multiplatform non-blocking way to determine if the TCP stream is connected:
     // Extracted from: https://github.com/tokio-rs/mio/issues/1486
     if let Ok(Some(_)) = stream.take_error() {
@@ -248,6 +246,18 @@ pub fn check_stream_ready(stream: &TcpStream) -> PendingStatus {
         Err(err) if err.kind() == io::ErrorKind::NotConnected => PendingStatus::Incomplete,
         Err(err) if err.kind() == io::ErrorKind::InvalidInput => PendingStatus::Incomplete,
         Err(_) => PendingStatus::Disconnected,
+    }
+}
+
+/// Get socket from tcp stream
+pub fn tcp_stream_to_socket(stream: &TcpStream) -> Socket {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        Socket::from_raw_socket(stream.as_raw_socket())
+    }
+    #[cfg(not(target_os = "windows"))]
+    unsafe {
+        Socket::from_raw_fd(stream.as_raw_fd())
     }
 }
 

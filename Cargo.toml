@@ -18,12 +18,15 @@ maintenance = { status = "actively-developed" }
 all-features = true
 
 [features]
-default = ["tcp", "websocket"] # All features by default
+default = ["tcp", "ssl", "websocket"]
 tcp = ["mio/net", "socket2"]
+ssl = ["mio/net", "socket2", "rustls-tls-native-roots"]
 websocket = ["tungstenite", "url", "tcp"]
+rustls-tls-native-roots = ["__rustls-tls", "rustls-native-certs", "pki-types", "rustls-pemfile"]
+rustls-tls-webpki-roots = ["__rustls-tls", "webpki-roots", "pki-types", "rustls-pemfile"]
+__rustls-tls = ["rustls"]
 
 [dependencies]
-mio = { version = "0.8", features = ["os-poll"] }
 serde = { version = "1", features = ["derive"] }
 crossbeam-channel = "0.5"
 crossbeam-utils = "0.8"
@@ -35,9 +38,17 @@ integer-encoding = "3"
 lazy_static = "1"
 bytemuck = { path = "../bytemuck", features = ["derive"] }
 bytes = { path = "../bytes", default-features = false }
+hashbrown = { path="../hashbrown" }
+http = { path = "../http" }
+mio = { path="../mio", features = ["os-poll"] }
 net_packet = { path = "../net_packet-rs" }
 opool = { path = "../opool" }
+parking_lot = { path="../parking_lot" }
+rustls = { path = "../rustls/rustls", optional = true }
+rustls-native-certs = { path = "../rustls-native-certs", optional = true }
 tungstenite = { path = "../tungstenite-rs", optional = true }
+webpki = { path = "../webpki", package = "rustls-webpki", optional = true }
+webpki-roots = { path = "../webpki-roots", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies.nix]
 version = "0.26"
@@ -47,6 +58,15 @@ features = ["socket", "uio", "net"]
 [target.'cfg(unix)'.dependencies.libc]
 version = "0.2"
 default-features = false
+
+[dependencies.pki-types]
+package = "rustls-pki-types"
+optional = true
+version = "0.2"
+
+[dependencies.rustls-pemfile]
+optional = true
+version = "=2.0.0-alpha.1"
 
 [dev-dependencies]
 bincode = "1"

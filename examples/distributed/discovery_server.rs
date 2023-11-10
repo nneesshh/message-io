@@ -3,7 +3,7 @@ use super::common::Message;
 use message_io::network::{Endpoint, NetEvent, Transport};
 use message_io::node::{self, NodeHandler, NodeListener};
 
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::io::{self};
 use std::net::SocketAddr;
 
