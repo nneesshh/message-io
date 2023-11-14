@@ -1,6 +1,4 @@
 use socket2::TcpKeepalive;
-#[cfg(unix)]
-use std::ffi::CString;
 use std::net::SocketAddr;
 use std::os::raw::c_int;
 use std::path::PathBuf;
@@ -73,6 +71,31 @@ impl SslListenConfig {
 ///
 #[cfg(feature = "native-tls")]
 pub mod encryption {
+    #[cfg(unix)]
+    use std::ffi::CString;
+    use std::io::{self, ErrorKind, Read, Result as IoResult, Write};
+    use std::mem::forget;
+    use std::net::SocketAddr;
+    #[cfg(target_os = "macos")]
+    use std::num::NonZeroU32;
+    use std::ops::DerefMut;
+    use std::sync::Arc;
+
+    use http::Uri;
+    use mio::event::Source;
+    use mio::net::{TcpListener, TcpStream};
+    use parking_lot::Mutex;
+    use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
+
+    use net_packet::{take_small_packet, NetPacketGuard, SMALL_PACKET_MAX_SIZE};
+
+    use crate::adapters::ssl::{ssl_acceptor, ssl_connector, ssl_stream::SslStream};
+    use crate::network::adapter::{
+        AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus,
+        Remote, Resource, SendStatus,
+    };
+    use crate::network::{RemoteAddr, TransportConnect, TransportListen};
+
     pub(crate) struct SslAdapter;
     impl Adapter for SslAdapter {
         type Remote = RemoteResource;
@@ -375,6 +398,8 @@ pub mod encryption {
 ///
 #[cfg(feature = "__rustls-tls")]
 pub mod encryption {
+    #[cfg(unix)]
+    use std::ffi::CString;
     use std::io::{self, ErrorKind, Read, Result as IoResult, Write};
     use std::mem::forget;
     use std::net::SocketAddr;
