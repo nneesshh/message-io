@@ -1,4 +1,6 @@
 use socket2::TcpKeepalive;
+#[cfg(unix)]
+use std::ffi::CString;
 use std::net::SocketAddr;
 use std::os::raw::c_int;
 use std::path::PathBuf;
@@ -51,12 +53,7 @@ impl SslListenConfig {
         cert_path: PathBuf,
         pri_key_path: PathBuf,
     ) -> Self {
-        Self {
-            bind_device,
-            keepalive,
-            cert_path,
-            pri_key_path,
-        }
+        Self { bind_device, keepalive, cert_path, pri_key_path }
     }
 
     /// Bind the TCP listener to a specific interface, identified by its name. This option works in
@@ -344,12 +341,7 @@ pub mod encryption {
 
             let local_addr = listener.local_addr().unwrap();
             Ok(ListeningInfo {
-                local: {
-                    LocalResource {
-                        listener,
-                        keepalive: config.keepalive,
-                    }
-                },
+                local: { LocalResource { listener, keepalive: config.keepalive } },
                 local_addr,
             })
         }
@@ -816,13 +808,7 @@ pub mod encryption {
             let local_addr = listener.local_addr().unwrap();
 
             Ok(ListeningInfo {
-                local: {
-                    LocalResource {
-                        listener,
-                        keepalive: config.keepalive,
-                        server_config,
-                    }
-                },
+                local: { LocalResource { listener, keepalive: config.keepalive, server_config } },
                 local_addr,
             })
         }
