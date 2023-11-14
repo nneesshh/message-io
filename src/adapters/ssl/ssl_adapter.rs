@@ -1,6 +1,7 @@
 use socket2::TcpKeepalive;
 use std::net::SocketAddr;
 use std::os::raw::c_int;
+use std::path::PathBuf;
 
 /// The maximum length of the pending (unaccepted) connection queue of a listener.
 pub const LISTENER_BACKLOG: c_int = 1024;
@@ -37,9 +38,27 @@ impl SslConnectConfig {
 pub struct SslListenConfig {
     bind_device: Option<String>,
     keepalive: Option<TcpKeepalive>,
+
+    cert_path: PathBuf,
+    pri_key_path: PathBuf,
 }
 
 impl SslListenConfig {
+    ///
+    pub fn new(
+        bind_device: Option<String>,
+        keepalive: Option<TcpKeepalive>,
+        cert_path: PathBuf,
+        pri_key_path: PathBuf,
+    ) -> Self {
+        Self {
+            bind_device,
+            keepalive,
+            cert_path,
+            pri_key_path,
+        }
+    }
+
     /// Bind the TCP listener to a specific interface, identified by its name. This option works in
     /// Unix, on other systems, it will be ignored.
     pub fn with_bind_device(mut self, device: String) -> Self {
@@ -364,13 +383,13 @@ pub mod encryption {
 ///
 #[cfg(feature = "__rustls-tls")]
 pub mod encryption {
-    use std::io::Result as IoResult;
-    use std::io::{self, ErrorKind, Read, Write};
+    use std::io::{self, ErrorKind, Read, Result as IoResult, Write};
     use std::mem::forget;
     use std::net::SocketAddr;
     #[cfg(target_os = "macos")]
     use std::num::NonZeroU32;
     use std::ops::DerefMut;
+    use std::sync::Arc;
 
     use http::Uri;
     use mio::event::Source;
@@ -519,18 +538,24 @@ pub mod encryption {
                 match deref_stream {
                     SslStream::RustlsStreamAcceptor(ref mut opt) => {
                         //
-                        if let Some((raw, acceptor)) = opt.take() {
-                            let wrapped_stream =
-                                ssl_acceptor::encryption::rustls::wrap_stream(raw, acceptor);
+                        if let Some((raw, acceptor, config)) = opt.take() {
+                            //
+                            let raw_id = std::format!("{:?}", raw);
+
+                            //
+                            let wrapped_stream = ssl_acceptor::encryption::rustls::wrap_stream(
+                                raw, acceptor, config,
+                            );
                             match wrapped_stream {
                                 Ok(s) => {
                                     // Switch stream state to the wrapped stream
                                     *stream = s;
                                 }
-                                Err((err, raw, acceptor)) => {
+                                Err((err, raw, acceptor, config)) => {
                                     // Recover stream state
-                                    *stream =
-                                        SslStream::RustlsStreamAcceptor(Some((raw, acceptor)));
+                                    *stream = SslStream::RustlsStreamAcceptor(Some((
+                                        raw, acceptor, config,
+                                    )));
 
                                     //
                                     if err.kind() == io::ErrorKind::WouldBlock {
@@ -538,8 +563,8 @@ pub mod encryption {
                                     } else {
                                         //
                                         log::error!(
-                                            "RustlsStreamAcceptor wrapped stream error: {}",
-                                            err
+                                            "RustlsStreamAcceptor wrapped stream error: {}, socket: {}",
+                                            err, raw_id
                                         );
                                         break ReadStatus::Disconnected;
                                     }
@@ -596,7 +621,11 @@ pub mod encryption {
                                 break ReadStatus::Disconnected
                             }
                             Err(err) => {
-                                log::error!("RustlsServerConnection read error: {}", err);
+                                log::error!(
+                                    "RustlsServerConnection read error: {} socket: {:?}",
+                                    err,
+                                    s.sock
+                                );
                                 break ReadStatus::Disconnected;
                             }
                         }
@@ -724,6 +753,8 @@ pub mod encryption {
     pub(crate) struct LocalResource {
         listener: TcpListener,
         keepalive: Option<TcpKeepalive>,
+
+        server_config: Arc<rustls::ServerConfig>,
     }
 
     impl Resource for LocalResource {
@@ -777,12 +808,19 @@ pub mod encryption {
 
             let listener = TcpListener::from_std(socket.into());
 
+            let server_config = ssl_acceptor::encryption::rustls::create_server_config(
+                &config.cert_path,
+                &config.pri_key_path,
+            );
+
             let local_addr = listener.local_addr().unwrap();
+
             Ok(ListeningInfo {
                 local: {
                     LocalResource {
                         listener,
                         keepalive: config.keepalive,
+                        server_config,
                     }
                 },
                 local_addr,
@@ -794,7 +832,7 @@ pub mod encryption {
                 match self.listener.accept() {
                     Ok((s, addr)) => {
                         //
-                        log::info!("accept along with remote addr: {:?}", addr);
+                        //log::info!("accept along with remote addr: {:?}", addr);
 
                         let acceptor = ssl_acceptor::encryption::rustls::create_acceptor();
                         accept_remote(AcceptedType::Remote(
@@ -802,7 +840,9 @@ pub mod encryption {
                             RemoteResource {
                                 //
                                 stream: Mutex::new(SslStream::RustlsStreamAcceptor(Some((
-                                    s, acceptor,
+                                    s,
+                                    acceptor,
+                                    self.server_config.clone(),
                                 )))),
                                 keepalive: self.keepalive.clone(),
                             },

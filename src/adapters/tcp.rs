@@ -152,7 +152,10 @@ impl Remote for RemoteResource {
         let stream = TcpStream::from_std(socket.into());
         let local_addr = stream.local_addr()?;
         Ok(ConnectionInfo {
-            remote: Self { stream, keepalive: config.keepalive },
+            remote: Self {
+                stream,
+                keepalive: config.keepalive,
+            },
             local_addr,
             peer_addr,
         })
@@ -319,7 +322,12 @@ impl Local for LocalResource {
 
         let local_addr = listener.local_addr().unwrap();
         Ok(ListeningInfo {
-            local: { LocalResource { listener, keepalive: config.keepalive } },
+            local: {
+                LocalResource {
+                    listener,
+                    keepalive: config.keepalive,
+                }
+            },
             local_addr,
         })
     }
@@ -329,7 +337,10 @@ impl Local for LocalResource {
             match self.listener.accept() {
                 Ok((stream, addr)) => accept_remote(AcceptedType::Remote(
                     addr,
-                    RemoteResource { stream, keepalive: self.keepalive.clone() },
+                    RemoteResource {
+                        stream,
+                        keepalive: self.keepalive.clone(),
+                    },
                 )),
                 Err(ref err) if err.kind() == ErrorKind::WouldBlock => break,
                 Err(ref err) if err.kind() == ErrorKind::Interrupted => continue,

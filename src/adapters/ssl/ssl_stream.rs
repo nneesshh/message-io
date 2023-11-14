@@ -5,15 +5,15 @@
 //! `Read + Write` traits.
 
 use std::io::{Read, Result as IoResult, Write};
+use std::sync::Arc;
 
 #[cfg(feature = "native-tls")]
 use native_tls_crate::TlsStream;
+
 #[cfg(feature = "__rustls-tls")]
-use rustls::server::Acceptor;
+use rustls::server::{Acceptor, ServerConfig};
 #[cfg(feature = "__rustls-tls")]
-use rustls::StreamOwned;
-#[cfg(feature = "__rustls-tls")]
-use rustls::{ClientConnection, ServerConnection};
+use rustls::{ClientConnection, ServerConnection, StreamOwned};
 #[cfg(feature = "__rustls-tls")]
 use std::ops::Deref;
 
@@ -60,7 +60,7 @@ pub enum SslStream<S: Read + Write + Sized> {
 #[cfg(feature = "__rustls-tls")]
 pub enum SslStream<S: Read + Write + Sized> {
     /// Raw stream with acceptor
-    RustlsStreamAcceptor(Option<(S, Acceptor)>),
+    RustlsStreamAcceptor(Option<(S, Acceptor, Arc<ServerConfig>)>),
 
     /// Encrypted ClientConnection
     RustlsClientConnection(rustls::StreamOwned<ClientConnection, S>),

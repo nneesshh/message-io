@@ -2,9 +2,6 @@
 
 ///
 pub mod encryption {
-    const CERT_PATH: &str = "certificate/myserver.pem";
-    const PRI_KEY_PATH: &str = "certificate/myserver.key";
-
     ///
     #[cfg(feature = "native-tls")]
     pub mod native_tls {
@@ -73,14 +70,11 @@ pub mod encryption {
         use std::path::PathBuf;
         use std::sync::Arc;
 
+        use pki_types::{CertificateDer, PrivateKeyDer};
         use rustls::server::{Acceptor, ServerConfig};
         use rustls::StreamOwned;
-        use pki_types::{CertificateDer, PrivateKeyDer};
 
         use crate::adapters::ssl::ssl_stream::SslStream;
-
-        use super::CERT_PATH;
-        use super::PRI_KEY_PATH;
 
         ///
         pub fn create_acceptor() -> Acceptor {
@@ -92,7 +86,8 @@ pub mod encryption {
         pub fn wrap_stream<S>(
             mut socket: S,
             mut acceptor: Acceptor,
-        ) -> Result<SslStream<S>, (io::Error, S, Acceptor)>
+            server_config: Arc<ServerConfig>,
+        ) -> Result<SslStream<S>, (io::Error, S, Acceptor, Arc<ServerConfig>)>
         where
             S: Read + Write + Sized,
         {
@@ -102,7 +97,7 @@ pub mod encryption {
                 match acceptor.read_tls(&mut socket) {
                     Ok(_n) => {
                         //
-                        log::info!("wrap_stream read tls bytes: {}", _n);
+                        //log::info!("wrap_stream read tls bytes: {}", _n);
 
                         //
                         match acceptor.accept() {
@@ -117,6 +112,7 @@ pub mod encryption {
                                         ),
                                         socket,
                                         acceptor,
+                                        server_config,
                                     ));
                                 }
                             }
@@ -125,35 +121,51 @@ pub mod encryption {
                                     io::Error::new(io::ErrorKind::Other, e.to_string()),
                                     socket,
                                     acceptor,
+                                    server_config,
                                 ));
                             }
                         }
                     }
                     Err(err) => {
-                        return Err((err, socket, acceptor));
+                        return Err((err, socket, acceptor, server_config));
                     }
                 }
             };
 
             //
-            let cert_path = PathBuf::from(CERT_PATH);
-            let pri_key_path = PathBuf::from(PRI_KEY_PATH);
-            let config = create_server_config(cert_path, pri_key_path);
-
-            let server = accepted.into_connection(config).unwrap();
+            let server = accepted.into_connection(server_config).unwrap();
 
             let stream = StreamOwned::new(server, socket);
 
             Ok(SslStream::RustlsServerConnection(stream))
         }
 
-        pub fn load_certs(path: PathBuf) -> Vec<CertificateDer<'static>> {
+        ///
+        pub fn create_server_config(
+            cert_path: &PathBuf,
+            pri_key_path: &PathBuf,
+        ) -> Arc<ServerConfig> {
+            //
+            let certs = load_certs(&cert_path);
+            let pri_key = load_private_key(&pri_key_path);
+
+            let config = ServerConfig::builder()
+                .with_safe_defaults()
+                .with_no_client_auth()
+                .with_single_cert(certs, pri_key)
+                .expect("bad certificate/key");
+
+            //
+            Arc::new(config)
+        }
+
+        fn load_certs(path: &PathBuf) -> Vec<CertificateDer<'static>> {
             let certfile = File::open(path).expect("cannot open certificate file");
             let mut reader = BufReader::new(certfile);
             rustls_pemfile::certs(&mut reader).map(|result| result.unwrap()).collect()
         }
 
-        pub fn load_private_key(path: PathBuf) -> PrivateKeyDer<'static> {
+        fn load_private_key(path: &PathBuf) -> PrivateKeyDer<'static> {
             let keyfile = File::open(&path).expect("cannot open private key file");
             let mut reader = BufReader::new(keyfile);
 
@@ -167,21 +179,6 @@ pub mod encryption {
                     _ => panic!("no keys found in {:?} (encrypted keys not supported)", path),
                 }
             }
-        }
-
-        fn create_server_config(cert_path: PathBuf, pri_key_path: PathBuf) -> Arc<ServerConfig> {
-            //
-            let certs = load_certs(cert_path);
-            let pri_key = load_private_key(pri_key_path);
-
-            let config = ServerConfig::builder()
-                .with_safe_defaults()
-                .with_no_client_auth()
-                .with_single_cert(certs, pri_key)
-                .expect("bad certificate/key");
-
-            //
-            Arc::new(config)
         }
     }
 }

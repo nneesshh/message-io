@@ -16,11 +16,7 @@ pub struct Register<S: Resource, P> {
 
 impl<S: Resource, P> Register<S, P> {
     fn new(resource: S, properties: P, poll_registry: Arc<PollRegistry>) -> Self {
-        Self {
-            resource,
-            properties,
-            poll_registry,
-        }
+        Self { resource, properties, poll_registry }
     }
 }
 
@@ -36,9 +32,7 @@ pub struct SafeResourceRegistry<S: Resource, P>(Arc<RwLock<ResourceRegistry<S, P
 impl<S: Resource, P> SafeResourceRegistry<S, P> {
     ///
     pub fn new(poll_registry: PollRegistry) -> Self {
-        Self(Arc::new(RwLock::new(ResourceRegistry::<S, P>::new(
-            poll_registry,
-        ))))
+        Self(Arc::new(RwLock::new(ResourceRegistry::<S, P>::new(poll_registry))))
     }
 
     /// Add a resource into the registry.
@@ -91,14 +85,14 @@ impl<S: Resource, P> ResourceRegistry<S, P> {
         let id = self.poll_registry.add(resource.source(), write_readiness);
         let register = Register::new(resource, properties, self.poll_registry.clone());
         self.resources.insert(id, Arc::new(register));
-        log::info!("registry ++++ {:?} len={}", id, self.resources.len());
+        //log::info!("registry ++++ {:?} len={}", id, self.resources.len());
         id
     }
 
     //#[inline(always)]
     fn deregister(&mut self, id: ResourceId) -> Option<Arc<Register<S, P>>> {
         let regitser_opt = self.resources.remove(&id);
-        log::info!("registry ---- {:?} len={}", id, self.resources.len());
+        //log::info!("registry ---- {:?} len={}", id, self.resources.len());
         regitser_opt
     }
 
