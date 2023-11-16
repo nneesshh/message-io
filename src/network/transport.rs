@@ -10,8 +10,9 @@ use crate::adapters::udp::{self, UdpAdapter, UdpConnectConfig, UdpListenConfig};
  */
 #[cfg(feature = "ssl")]
 use crate::adapters::ssl::ssl_adapter::{self, encryption::SslAdapter};
-#[cfg(feature = "websocket")]
+/*#[cfg(feature = "websocket")]
 use crate::adapters::ws::{self, WsAdapter};
+ */
 
 use serde::{Deserialize, Serialize};
 
@@ -49,13 +50,15 @@ pub enum Transport {
     /// Tls protocol
     #[cfg(feature = "ssl")]
     Ssl,
-    /// WebSocket protocol (available through the *websocket* feature).
+    /*/// WebSocket protocol (available through the *websocket* feature).
     /// If you use a [`crate::network::RemoteAddr::Str`] in the `connect()` method,
     /// you can specify an URL with `wss` of `ws` schemas to connect with or without security.
     /// If you use a [`crate::network::RemoteAddr::Socket`] the socket will be a normal
     /// websocket with the following uri: `ws://{SocketAddr}/message-io-default`.
     #[cfg(feature = "websocket")]
     Ws,
+
+     */
 }
 
 impl Transport {
@@ -73,8 +76,10 @@ impl Transport {
              */
             #[cfg(feature = "ssl")]
             Self::Ssl => loader.mount(self.id(), SslAdapter),
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Self::Ws => loader.mount(self.id(), WsAdapter),
+
+             */
         };
     }
 
@@ -96,8 +101,10 @@ impl Transport {
              */
             #[cfg(feature = "ssl")]
             Self::Ssl => usize::MAX,
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Self::Ws => ws::MAX_PAYLOAD_LEN,
+
+             */
         }
     }
 
@@ -115,8 +122,10 @@ impl Transport {
              */
             #[cfg(feature = "ssl")]
             Transport::Ssl => true,
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Transport::Ws => true,
+
+             */
         }
     }
 
@@ -138,8 +147,10 @@ impl Transport {
              */
             #[cfg(feature = "ssl")]
             Transport::Ssl => true,
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Transport::Ws => true,
+
+             */
         }
     }
 
@@ -157,8 +168,10 @@ impl Transport {
              */
             #[cfg(feature = "ssl")]
             Transport::Ssl => 3,
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Transport::Ws => 4,
+
+             */
         }
     }
 }
@@ -176,8 +189,10 @@ impl From<u8> for Transport {
              */
             #[cfg(feature = "ssl")]
             3 => Transport::Ssl,
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             4 => Transport::Ws,
+
+             */
             _ => panic!("Not available transport"),
         }
     }
@@ -201,8 +216,10 @@ pub enum TransportConnect {
      */
     #[cfg(feature = "ssl")]
     Ssl(ssl_adapter::SslConnectConfig),
-    #[cfg(feature = "websocket")]
+    /*#[cfg(feature = "websocket")]
     Ws,
+
+     */
 }
 
 impl TransportConnect {
@@ -218,8 +235,10 @@ impl TransportConnect {
              */
             #[cfg(feature = "ssl")]
             Self::Ssl(_) => Transport::Ssl,
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Self::Ws => Transport::Ws,
+
+             */
         };
 
         transport.id()
@@ -239,8 +258,10 @@ impl From<Transport> for TransportConnect {
              */
             #[cfg(feature = "ssl")]
             Transport::Ssl => Self::Ssl(ssl_adapter::SslConnectConfig::default()),
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Transport::Ws => Self::Ws,
+
+             */
         }
     }
 }
@@ -257,8 +278,10 @@ pub enum TransportListen {
      */
     #[cfg(feature = "ssl")]
     Ssl(ssl_adapter::SslListenConfig),
-    #[cfg(feature = "websocket")]
+    /*#[cfg(feature = "websocket")]
     Ws,
+
+     */
 }
 
 impl TransportListen {
@@ -274,8 +297,10 @@ impl TransportListen {
              */
             #[cfg(feature = "ssl")]
             Self::Ssl(_) => Transport::Ssl,
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Self::Ws => Transport::Ws,
+
+             */
         };
 
         transport.id()
@@ -295,8 +320,10 @@ impl From<Transport> for TransportListen {
              */
             #[cfg(feature = "ssl")]
             Transport::Ssl => Self::Ssl(ssl_adapter::SslListenConfig::default()),
-            #[cfg(feature = "websocket")]
+            /*#[cfg(feature = "websocket")]
             Transport::Ws => Self::Ws,
+
+             */
         }
     }
 }

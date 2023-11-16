@@ -27,17 +27,19 @@ impl<S: Resource, P> Drop for Register<S, P> {
 }
 
 /// SafeResourceRegistry
-pub struct SafeResourceRegistry<S: Resource, P>(Arc<RwLock<ResourceRegistry<S, P>>>);
+pub struct SafeResourceRegistry<S: Resource, P> {
+    pub inner: Arc<RwLock<ResourceRegistry<S, P>>>,
+}
 
 impl<S: Resource, P> SafeResourceRegistry<S, P> {
     ///
     pub fn new(poll_registry: PollRegistry) -> Self {
-        Self(Arc::new(RwLock::new(ResourceRegistry::<S, P>::new(poll_registry))))
+        Self { inner: Arc::new(RwLock::new(ResourceRegistry::<S, P>::new(poll_registry))) }
     }
 
     /// Add a resource into the registry.
     pub fn register(&self, resource: S, properties: P, write_readiness: bool) -> ResourceId {
-        let mut registry = self.0.write();
+        let mut registry = self.inner.write();
         registry.register(resource, properties, write_readiness)
     }
 
@@ -46,24 +48,24 @@ impl<S: Resource, P> SafeResourceRegistry<S, P> {
     /// but not the destruction of the resource itself.
     /// Because the resource is shared, the destruction will be delayed until the last reference.
     pub fn deregister(&self, id: ResourceId) -> bool {
-        let mut registry = self.0.write();
+        let mut registry = self.inner.write();
         registry.deregister(id).is_some()
     }
 
     /// Returned a shared reference of the register.
     pub fn get(&self, id: ResourceId) -> Option<Arc<Register<S, P>>> {
-        let registry = self.0.read();
+        let registry = self.inner.read();
         registry.get(id)
     }
 }
 
 impl<S: Resource, P> Clone for SafeResourceRegistry<S, P> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self { inner: self.inner.clone() }
     }
 }
 
-struct ResourceRegistry<S: Resource, P> {
+pub struct ResourceRegistry<S: Resource, P> {
     resources: HashMap<ResourceId, Arc<Register<S, P>>>,
     poll_registry: Arc<PollRegistry>,
 }
