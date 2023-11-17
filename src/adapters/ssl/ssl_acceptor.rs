@@ -133,7 +133,7 @@ pub mod encryption {
             };
 
             //
-            match accepted.into_connection(server_config) {
+            match accepted.into_connection(server_config.clone()) {
                 Ok(server) => {
                     //
                     let stream = StreamOwned::new(server, socket);
