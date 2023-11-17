@@ -133,11 +133,22 @@ pub mod encryption {
             };
 
             //
-            let server = accepted.into_connection(server_config).unwrap();
-
-            let stream = StreamOwned::new(server, socket);
-
-            Ok(SslStream::RustlsServerConnection(stream))
+            match accepted.into_connection(server_config) {
+                Ok(server) => {
+                    //
+                    let stream = StreamOwned::new(server, socket);
+                    Ok(SslStream::RustlsServerConnection(stream))
+                }
+                Err(err) => {
+                    //
+                    Err((
+                        io::Error::new(io::ErrorKind::Other, err.to_string()),
+                        socket,
+                        acceptor,
+                        server_config,
+                    ))
+                }
+            }
         }
 
         ///
