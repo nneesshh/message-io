@@ -11,7 +11,7 @@ enum Signal {
 }
 
 pub fn run(transport: Transport, remote_addr: RemoteAddr) {
-    let (handler, listener) = node::split();
+    let (handler, listener) = node::split::<Signal>();
 
     let (server_id, local_addr) =
         handler.network().connect(transport, remote_addr.clone()).unwrap();

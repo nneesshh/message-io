@@ -49,6 +49,8 @@ impl Poll {
     const EVENTS_SIZE: usize = 1024;
     const WAKER_TOKEN: Token = Token(0);
 
+    ///
+    #[inline(always)]
     pub fn process_event<C>(&mut self, timeout: Option<Duration>, mut event_callback: C)
     where
         C: FnMut(PollEvent),
@@ -86,12 +88,15 @@ impl Poll {
         }
     }
 
+    ///
+    #[inline(always)]
     pub fn create_registry(&mut self, adapter_id: u8, resource_type: ResourceType) -> PollRegistry {
         PollRegistry::new(adapter_id, resource_type, self.mio_poll.registry().try_clone().unwrap())
     }
 
-    #[allow(dead_code)] //TODO: remove it with poll native event support
-    pub fn create_waker(&mut self) -> PollWaker {
+    ///
+    #[inline(always)]
+    pub fn create_waker(&self) -> PollWaker {
         PollWaker::new(self.waker.clone())
     }
 }
@@ -109,6 +114,8 @@ impl PollRegistry {
         }
     }
 
+    ///
+    #[inline(always)]
     pub fn add(&self, source: &mut dyn Source, write_readiness: bool) -> ResourceId {
         let id = self.id_generator.generate();
         let interest = match write_readiness {
@@ -119,12 +126,15 @@ impl PollRegistry {
         id
     }
 
+    ///
+    #[inline(always)]
     pub fn remove(&self, source: &mut dyn Source) {
         self.registry.deregister(source).unwrap()
     }
 }
 
 impl Clone for PollRegistry {
+    #[inline(always)]
     fn clone(&self) -> Self {
         Self {
             id_generator: self.id_generator.clone(),
@@ -133,18 +143,19 @@ impl Clone for PollRegistry {
     }
 }
 
-#[allow(dead_code)] //TODO: remove it with poll native event support
+///
 pub struct PollWaker {
     waker: Arc<Waker>,
 }
 
 impl PollWaker {
-    #[allow(dead_code)] //TODO: remove it with poll native event support
+    #[inline(always)]
     fn new(waker: Arc<Waker>) -> Self {
         Self { waker }
     }
 
-    #[allow(dead_code)] //TODO: remove it with poll native event support
+    ///
+    #[inline(always)]
     pub fn wake(&self) {
         self.waker.wake().unwrap();
         log::trace!("Wake poll...");
@@ -152,6 +163,7 @@ impl PollWaker {
 }
 
 impl Clone for PollWaker {
+    #[inline(always)]
     fn clone(&self) -> Self {
         Self { waker: self.waker.clone() }
     }

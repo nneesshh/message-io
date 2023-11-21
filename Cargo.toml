@@ -18,7 +18,7 @@ maintenance = { status = "actively-developed" }
 all-features = true
 
 [features]
-default = ["tcp", "ssl", "websocket"]
+default = ["tcp", "ssl"]
 tcp = ["mio/net", "socket2"]
 ssl = ["mio/net", "socket2", "rustls-tls-native-roots"]
 websocket = ["tungstenite", "url", "tcp"]
