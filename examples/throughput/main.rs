@@ -1,5 +1,6 @@
 use message_io::network::{NetEvent, Transport};
 use message_io::node::{self};
+use net_packet::take_packet;
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -29,7 +30,7 @@ fn throughput_message_io(transport: Transport, packet_size: usize) {
     print!("message-io {}:  \t", transport);
     std::io::stdout().flush().unwrap();
 
-    let (handler, listener) = node::split::<()>();
+    let (handler, listener) = node::split();
     let message = (0..packet_size).map(|_| 0xFF).collect::<Vec<u8>>();
 
     let (_, addr) = handler.network().listen(transport, "127.0.0.1:0").unwrap();
@@ -67,7 +68,9 @@ fn throughput_message_io(transport: Transport, packet_size: usize) {
 
     let start_time = Instant::now();
     while handler.is_running() {
-        handler.network().send(endpoint, &message);
+        let mut buffer = take_packet(message.len());
+        buffer.append_slice(message.as_slice());
+        handler.network().send(endpoint, buffer);
     }
 
     let end_time = r_time.recv().unwrap();

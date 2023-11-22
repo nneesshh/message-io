@@ -25,7 +25,7 @@ impl Endpoint {
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::{Transport, Endpoint, NetEvent};
     ///
-    /// let (handler, listener) = node::split::<()>();
+    /// let (handler, listener) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1)); //timeout
     ///
     /// let listen_addr = "127.0.0.1:0";
@@ -39,7 +39,7 @@ impl Endpoint {
     ///
     /// let (mut msg_1, mut msg_2) = (0, 0);
     /// listener.for_each(|event| match event {
-    ///     NodeEvent::Signal(_) => handler.stop(),
+    ///     NodeEvent::Waker(_) => handler.stop(),
     ///     NodeEvent::Network(net_event) => match net_event {
     ///         NetEvent::Message(endpoint, message) => match endpoint.resource_id() {
     ///             id if id == receiver_id_1 => msg_1 = message[0],

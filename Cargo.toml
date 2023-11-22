@@ -43,7 +43,8 @@ http = { path = "../http" }
 mio = { path="../mio", features = ["os-poll"] }
 net_packet = { path = "../net_packet-rs" }
 opool = { path = "../opool" }
-parking_lot = { path="../parking_lot" }
+parking_lot = { path = "../parking_lot" }
+pinky-swear = { ptah = "pinky-swear" }
 rustls = { path = "../rustls/rustls", optional = true }
 rustls-native-certs = { path = "../rustls-native-certs", optional = true }
 tungstenite = { path = "../tungstenite-rs", optional = true }

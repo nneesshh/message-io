@@ -1,12 +1,13 @@
 use net_packet::{take_small_packet, NetPacketGuard};
 
-use super::adapter::{AcceptedType, Adapter, Local, PendingStatus, ReadStatus, Remote, SendStatus};
+use super::adapter::{AcceptedType, Adapter, Local, PendingStatus, ReadStatus, Remote};
 use super::endpoint::Endpoint;
 use super::poll::Poll;
 use super::registry::{Register, SafeResourceRegistry};
 use super::remote_addr::RemoteAddr;
 use super::resource_id::{ResourceId, ResourceType};
 use super::transport::{TransportConnect, TransportListen};
+use super::SendStatus;
 
 use std::io::{self};
 use std::net::SocketAddr;
@@ -72,25 +73,13 @@ impl std::fmt::Debug for NetEvent {
     }
 }
 
-pub trait ActionController: Send + Sync {
-    fn connect_with(
-        &self,
-        config: TransportConnect,
-        addr: RemoteAddr,
-    ) -> io::Result<(Endpoint, SocketAddr)>;
-    fn listen_with(
-        &self,
-        config: TransportListen,
-        addr: SocketAddr,
-    ) -> io::Result<(ResourceId, SocketAddr)>;
-    fn send(&self, endpoint: Endpoint, data: &[u8]) -> SendStatus;
-    fn remove(&self, id: ResourceId) -> bool;
-    fn is_ready(&self, id: ResourceId) -> Option<bool>;
-}
-
 pub trait EventProcessor: Send + Sync {
-    fn process_read(&self, id: ResourceId, callback: &mut dyn FnMut(NetEvent));
-    fn process_write(&self, id: ResourceId, callback: &mut dyn FnMut(NetEvent));
+    fn process_read(&mut self, id: ResourceId, callback: &mut dyn FnMut(NetEvent));
+    fn process_write(&mut self, id: ResourceId, callback: &mut dyn FnMut(NetEvent));
+    fn process_connect(&mut self, config: TransportConnect, addr: RemoteAddr) -> io::Result<(Endpoint, SocketAddr)>;
+    fn process_listen(&mut self, config: TransportListen, addr: SocketAddr)->io::Result<(ResourceId, SocketAddr)>;
+    fn process_send(&mut self, endpoint: Endpoint, buffer: NetPacketGuard) -> SendStatus;
+    fn process_close(&mut self, id: ResourceId) -> bool;
 }
 
 struct RemoteProperties {
@@ -101,7 +90,11 @@ struct RemoteProperties {
 
 impl RemoteProperties {
     fn new(peer_addr: SocketAddr, local: Option<ResourceId>) -> Self {
-        Self { peer_addr, local, ready: AtomicBool::new(false) }
+        Self {
+            peer_addr,
+            local,
+            ready: AtomicBool::new(false),
+        }
     }
 
     pub fn is_ready(&self) -> bool {
@@ -145,76 +138,8 @@ impl<R: Remote, L: Local> Clone for Driver<R, L> {
     }
 }
 
-impl<R: Remote, L: Local> ActionController for Driver<R, L> {
-    fn connect_with(
-        &self,
-        config: TransportConnect,
-        addr: RemoteAddr,
-    ) -> io::Result<(Endpoint, SocketAddr)> {
-        R::connect_with(config, addr).map(|info| {
-            let id = self.remote_registry.register(
-                info.remote,
-                RemoteProperties::new(info.peer_addr, None),
-                true,
-            );
-            (Endpoint::new(id, info.peer_addr), info.local_addr)
-        })
-    }
-
-    fn listen_with(
-        &self,
-        config: TransportListen,
-        addr: SocketAddr,
-    ) -> io::Result<(ResourceId, SocketAddr)> {
-        L::listen_with(config, addr).map(|info| {
-            let id = self.local_registry.register(info.local, LocalProperties, false);
-            (id, info.local_addr)
-        })
-    }
-
-    fn send(&self, endpoint: Endpoint, data: &[u8]) -> SendStatus {
-        match endpoint.resource_id().resource_type() {
-            ResourceType::Remote => {
-                //
-                match self.remote_registry.get(endpoint.resource_id()) {
-                    Some(ref mut remote) => {
-                        //
-                        if remote.properties.is_ready() {
-                            remote.resource.send(data)
-                        } else {
-                            SendStatus::ResourceNotAvailable
-                        }
-                    }
-                    None => SendStatus::ResourceNotFound,
-                }
-            }
-            ResourceType::Local => {
-                //
-                match self.local_registry.get(endpoint.resource_id()) {
-                    Some(remote) => remote.resource.send_to(endpoint.addr(), data),
-                    None => SendStatus::ResourceNotFound,
-                }
-            }
-        }
-    }
-
-    fn remove(&self, id: ResourceId) -> bool {
-        match id.resource_type() {
-            ResourceType::Remote => self.remote_registry.deregister(id),
-            ResourceType::Local => self.local_registry.deregister(id),
-        }
-    }
-
-    fn is_ready(&self, id: ResourceId) -> Option<bool> {
-        match id.resource_type() {
-            ResourceType::Remote => self.remote_registry.get(id).map(|r| r.properties.is_ready()),
-            ResourceType::Local => self.local_registry.get(id).map(|_| true),
-        }
-    }
-}
-
 impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
-    fn process_read(&self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
+    fn process_read(&mut self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
         match id.resource_type() {
             ResourceType::Remote => {
                 if let Some(ref mut remote) = self.remote_registry.get(id) {
@@ -246,7 +171,7 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             }
         }
     }
-    fn process_write(&self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
+    fn process_write(&mut self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
         match id.resource_type() {
             ResourceType::Remote => {
                 if let Some(ref mut remote) = self.remote_registry.get(id) {
@@ -271,6 +196,64 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             ResourceType::Local => {
                 // do nothing
             }
+        }
+    }
+    fn process_connect(&mut self, config: TransportConnect, addr: RemoteAddr) -> io::Result<(Endpoint, SocketAddr)> {
+        let ret = R::connect_with(config, addr).map(|info| {
+            let id = self.remote_registry.register(
+                info.remote,
+                RemoteProperties::new(info.peer_addr, None),
+                true,
+            );
+            (Endpoint::new(id, info.peer_addr), info.local_addr)
+        });
+        ret.map(|(endpoint, addr)| {
+            log::trace!("Connect to {}", endpoint);
+            (endpoint, addr)
+        })
+    }
+    fn process_listen(&mut self, config: TransportListen, addr: SocketAddr) -> io::Result<(ResourceId, SocketAddr)> {
+        let ret = L::listen_with(config, addr).map(|info| {
+            let id = self
+                .local_registry
+                .register(info.local, LocalProperties, false);
+            (id, info.local_addr)
+        });
+        ret.map(|(resource_id, addr)| {
+            log::trace!("Listening at {} by {}", addr, resource_id);
+            (resource_id, addr)
+        })
+    }
+    fn process_send(&mut self, endpoint: Endpoint, buffer: NetPacketGuard) -> SendStatus {
+        let data = buffer.peek();
+        match endpoint.resource_id().resource_type() {
+            ResourceType::Remote => {
+                //
+                match self.remote_registry.get(endpoint.resource_id()) {
+                    Some(ref mut remote) => {
+                        //
+                        if remote.properties.is_ready() {
+                            remote.resource.send(data)
+                        } else {
+                            SendStatus::ResourceNotAvailable
+                        }
+                    }
+                    None => SendStatus::ResourceNotFound,
+                }
+            }
+            ResourceType::Local => {
+                //
+                match self.local_registry.get(endpoint.resource_id()) {
+                    Some(remote) => remote.resource.send_to(endpoint.addr(), data),
+                    None => SendStatus::ResourceNotFound,
+                }
+            }
+        }
+    }
+    fn process_close(&mut self, id: ResourceId) -> bool {
+        match id.resource_type() {
+            ResourceType::Remote => self.remote_registry.deregister(id),
+            ResourceType::Local => self.local_registry.deregister(id),
         }
     }
 }
@@ -320,8 +303,9 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         endpoint: Endpoint,
         mut event_callback: impl FnMut(NetEvent),
     ) {
-        let status =
-            remote.resource.receive(|data| event_callback(NetEvent::Message(endpoint, data)));
+        let status = remote
+            .resource
+            .receive(|data| event_callback(NetEvent::Message(endpoint, data)));
         log::trace!("Receive status: {:?}", status);
         if let ReadStatus::Disconnected = status {
             // Checked because, the user in the callback could have removed the same resource.

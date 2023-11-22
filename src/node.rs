@@ -1,8 +1,8 @@
-use crate::events::{self, EventReceiver, EventSender};
-use crate::network::{self, NetEvent, NetworkController, NetworkProcessor};
+use crate::events::{self, EventSender};
+use crate::network::{self, NetEvent, NetworkController, NetworkProcessor, PollWaker};
 use crate::util::thread::NamespacedThread;
+use crate::WakerCommand;
 
-use parking_lot::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -15,47 +15,45 @@ lazy_static::lazy_static! {
 
 /// Event returned by [`NodeListener::for_each()`] and [`NodeListener::for_each_async()`]
 /// when some network event or signal is received.
-pub enum NodeEvent<S> {
+pub enum NodeEvent {
     /// The `NodeEvent` is an event that comes from the network.
     /// See [`NetEvent`] to know about the different network events.
     Network(NetEvent),
 
-    /// The `NodeEvent` is a signal.
-    /// A signal is an event produced by the own node to itself.
-    /// You can send signals with timers or priority.
-    /// See [`EventSender`] to know about how to send signals.
-    Signal(S),
+    /// The `NodeEvent` is a command from user and wake up the poll thread to recv.
+    /// See [`EventSender`] to know about how to send commands.
+    Waker(WakerCommand),
 }
 
-impl<S: std::fmt::Debug> std::fmt::Debug for NodeEvent<S> {
+impl std::fmt::Debug for NodeEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             NodeEvent::Network(net_event) => write!(f, "NodeEvent::Network({net_event:?})"),
-            NodeEvent::Signal(signal) => write!(f, "NodeEvent::Signal({signal:?})"),
+            NodeEvent::Waker(command) => write!(f, "NodeEvent::Waker({command:?})"),
         }
     }
 }
 
-impl<S> NodeEvent<S> {
+impl NodeEvent {
     /// Assume the event is a [`NodeEvent::Network`], panics if not.
     pub fn network(self) -> NetEvent {
         match self {
             NodeEvent::Network(net_event) => net_event,
-            NodeEvent::Signal(..) => panic!("NodeEvent must be a NetEvent"),
+            NodeEvent::Waker(..) => panic!("NodeEvent must be a NetEvent"),
         }
     }
 
-    /// Assume the event is a [`NodeEvent::Signal`], panics if not.
-    pub fn signal(self) -> S {
+    /// Assume the event is a [`NodeEvent::Waker`], panics if not.
+    pub fn waker(self) -> WakerCommand {
         match self {
-            NodeEvent::Network(..) => panic!("NodeEvent must be a Signal"),
-            NodeEvent::Signal(signal) => signal,
+            NodeEvent::Network(..) => panic!("NodeEvent must be a WakerCommand"),
+            NodeEvent::Waker(command) => command,
         }
     }
 }
 
 /// Creates a node already working.
-/// This function offers two instances: a [`NodeHandler`] to perform network and signals actions
+/// This function offers two instances: a [`NodeHandler`] to perform network and commands actions
 /// and a [`NodeListener`] to receive the events the node receives.
 ///
 /// Note that [`NodeListener`] is already listen for events from its creation.
@@ -63,73 +61,66 @@ impl<S> NodeEvent<S> {
 /// Any event happened before `for_each()` call will be also dispatched.
 ///
 /// # Examples
-/// ```rust
+/// ```rust,no_run
 /// use message_io::node::{self, NodeEvent};
-///
-/// enum Signal {
-///     Close,
-///     Tick,
-///     //Other signals here.
-/// }
 ///
 /// let (handler, listener) = node::split();
 ///
-/// handler.signals().send_with_timer(Signal::Close, std::time::Duration::from_secs(1));
-///
 /// listener.for_each(move |event| match event {
 ///     NodeEvent::Network(_) => { /* ... */ },
-///     NodeEvent::Signal(signal) => match signal {
-///         Signal::Close => handler.stop(), //Received after 1 sec
-///         Signal::Tick => { /* ... */ },
-///     },
+///     NodeEvent::Waker(command) => handler.stop(), //Received after 1 sec
 /// });
 /// ```
 ///
-/// In case you don't use signals, specify the node type with an unit (`()`) type.
+/// In case you don't use commands, specify the node type with an unit (`()`) type.
 /// ```
 /// use message_io::node::{self};
 ///
-/// let (handler, listener) = node::split::<()>();
+/// let (handler, listener) = node::split();
 /// ```
-pub fn split<S: Send>() -> (NodeHandler<S>, NodeListener<S>) {
-    let (network_controller, network_processor) = network::split();
-    let (signal_sender, signal_receiver) = events::split();
+pub fn split() -> (NodeHandler, NodeListener) {
+    let (command_sender, command_receiver) = events::split();
+    let (network_controller, network_processor) = network::split(command_sender, command_receiver);
+
     let running = AtomicBool::new(true);
 
-    let handler = NodeHandler(Arc::new(NodeHandlerImpl {
-        network: network_controller,
-        signals: signal_sender,
-        running,
-    }));
+    let handler = NodeHandler(Arc::new(NodeHandlerImpl { network: network_controller, running }));
 
-    let listener = NodeListener::new(network_processor, signal_receiver, handler.clone());
+    let listener = NodeListener::new(network_processor, handler.clone());
 
     (handler, listener)
 }
 
-struct NodeHandlerImpl<S> {
+struct NodeHandlerImpl {
     network: NetworkController,
-    signals: EventSender<S>,
     running: AtomicBool,
 }
 
 /// A shareable and clonable entity that allows to deal with
-/// the network, send signals and stop the node.
-pub struct NodeHandler<S>(Arc<NodeHandlerImpl<S>>);
+/// the network, send commands and stop the node.
+pub struct NodeHandler(Arc<NodeHandlerImpl>);
 
-impl<S> NodeHandler<S> {
+impl NodeHandler {
     /// Returns a reference to the NetworkController to deal with the network.
     /// See [`NetworkController`]
+    #[inline(always)]
     pub fn network(&self) -> &NetworkController {
         &self.0.network
     }
 
-    /// Returns a reference to the EventSender to send signals to the node.
+    /// Returns a reference to the EventSender to send commands to the node.
     /// Signals are events that the node send to itself useful in situation where you need
     /// to "wake up" the [`NodeListener`] to perform some action.
     /// See [`EventSender`].
-    pub fn signals(&self) -> &EventSender<S> {
-        &self.0.signals
+    #[inline(always)]
+    pub fn commands(&self) -> &EventSender<WakerCommand> {
+        self.network().commands()
+    }
+
+    ///
+    #[inline(always)]
+    pub fn waker(&self) -> &PollWaker {
+        &self.network().waker()
     }
 
     /// Finalizes the [`NodeListener`].
@@ -141,32 +132,28 @@ impl<S> NodeHandler<S> {
     /// Check if the node is running.
     /// Note that the node is running and listening events from its creation,
     /// not only once you call to [`NodeListener::for_each()`].
+    #[inline(always)]
     pub fn is_running(&self) -> bool {
         self.0.running.load(Ordering::Relaxed)
     }
 }
 
-impl<S: Send + 'static> Clone for NodeHandler<S> {
+impl Clone for NodeHandler {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-/// Listen events for network and signal events.
-pub struct NodeListener<S: Send + 'static> {
+/// Listen events for network and command from user.
+pub struct NodeListener {
     network_processor_opt: Option<NetworkProcessor>,
-    signal_receiver: EventReceiver<S>,
-    handler: NodeHandler<S>,
+    handler: NodeHandler,
 }
 
-impl<S: Send + 'static> NodeListener<S> {
-    fn new(
-        network_processor: NetworkProcessor,
-        signal_receiver: EventReceiver<S>,
-        handler: NodeHandler<S>,
-    ) -> NodeListener<S> {
+impl NodeListener {
+    fn new(network_processor: NetworkProcessor, handler: NodeHandler) -> NodeListener {
         //
-        NodeListener { network_processor_opt: Some(network_processor), signal_receiver, handler }
+        NodeListener { network_processor_opt: Some(network_processor), handler }
     }
 
     /// Iterate indefinitely over all generated `NetEvent`.
@@ -175,70 +162,36 @@ impl<S: Send + 'static> NodeListener<S> {
     /// Note that any events generated before calling this function (e.g. some connection was done)
     /// will be stored and offered once you call `for_each()`.
     /// # Example
-    /// ```
+    /// ```rust,no_run
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::Transport;
     ///
     /// let (handler, listener) = node::split();
-    /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
+    ///
     /// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
     ///
     /// listener.for_each(move |event| match event {
     ///     NodeEvent::Network(net_event) => { /* Your logic here */ },
-    ///     NodeEvent::Signal(_) => handler.stop(),
+    ///     NodeEvent::Waker(_) => handler.stop(),
     /// });
     /// // Blocked here until handler.stop() is called (1 sec).
     /// println!("Node is stopped");
     /// ```
-    pub fn for_each(mut self, event_callback: impl FnMut(NodeEvent<S>) + Send) {
+    pub fn for_each(mut self, mut event_callback: impl FnMut(NodeEvent) + Send) {
         //
-        crossbeam_utils::thread::scope(|scope| {
-            let multiplexed = Arc::new(Mutex::new(event_callback));
+        crossbeam_utils::thread::scope(|_| {
+            //
+            let mut network_processor = self.network_processor_opt.take().unwrap();
 
-            let _signal_thread = {
-                let mut signal_receiver = std::mem::take(&mut self.signal_receiver);
-                let handler = self.handler.clone();
-
-                // This struct is used to allow passing the no sendable event_callback
-                // into the signal thread.
-                // It is safe because the thread are scoped and the callback is managed by a lock,
-                // so only one call is performed at the same time.
-                // It implies that any object moved into the callback do not have
-                // any concurrence issues.
-                #[allow(clippy::type_complexity)]
-                struct SendableEventCallback<'a, S>(
-                    Arc<Mutex<dyn FnMut(NodeEvent<S>) + Send + 'a>>,
-                );
-                #[allow(clippy::non_send_fields_in_send_ty)]
-                unsafe impl<'a, S> Send for SendableEventCallback<'a, S> {}
-
-                let multiplexed = SendableEventCallback(multiplexed.clone());
-
-                scope
-                    .builder()
-                    .name(String::from("node-network-thread"))
-                    .spawn(move |_| {
-                        while handler.is_running() {
-                            if let Some(signal) = signal_receiver.receive_timeout(*SAMPLING_TIMEOUT)
-                            {
-                                let mut event_callback = multiplexed.0.lock();
-                                if handler.is_running() {
-                                    event_callback(NodeEvent::Signal(signal));
-                                }
-                            }
-                        }
-                    })
-                    .unwrap()
+            let cb = &mut |e| {
+                if self.handler.is_running() {
+                    event_callback(e);
+                }
             };
 
-            let mut network_processor = self.network_processor_opt.take().unwrap();
+            //
             while self.handler.is_running() {
-                network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), |net_event| {
-                    let mut event_callback = multiplexed.lock();
-                    if self.handler.is_running() {
-                        event_callback(NodeEvent::Network(net_event));
-                    }
-                });
+                network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), cb);
             }
         })
         .unwrap();
@@ -254,17 +207,17 @@ impl<S: Send + 'static> NodeListener<S> {
     /// an object with a longer lifetime.
     ///
     /// # Example
-    /// ```
+    /// ```rust,no_run
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::Transport;
     ///
     /// let (handler, listener) = node::split();
-    /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1));
+    ///
     /// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
     ///
     /// let task = listener.for_each_async(move |event| match event {
     ///      NodeEvent::Network(net_event) => { /* Your logic here */ },
-    ///      NodeEvent::Signal(_) => handler.stop(),
+    ///      NodeEvent::Waker(_) => handler.stop(),
     /// });
     /// // for_each_async() will act asynchronous during 'task' lifetime.
     ///
@@ -279,56 +232,36 @@ impl<S: Send + 'static> NodeListener<S> {
     /// ```
     pub fn for_each_async(
         mut self,
-        event_callback: impl FnMut(NodeEvent<S>) + Send + 'static,
+        mut event_callback: impl FnMut(NodeEvent) + Send + 'static,
     ) -> NodeTask {
         //
-        let multiplexed = Arc::new(Mutex::new(event_callback));
-
-        // To avoid processing stops while the node is configuring,
-        // the user callback locked until the function ends.
-        let _locked = multiplexed.lock();
-
         let network_thread = {
-            let multiplexed = multiplexed.clone();
+            //
             let handler = self.handler.clone();
+
+            //
             let mut network_processor = self.network_processor_opt.take().unwrap();
 
             //
             NamespacedThread::spawn("node-network-thread", move || {
                 //
-                while handler.is_running() {
-                    network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), |net_event| {
-                        let mut event_callback = multiplexed.lock();
-                        if handler.is_running() {
-                            event_callback(NodeEvent::Network(net_event));
-                        }
-                    });
-                }
-            })
-        };
-
-        let signal_thread = {
-            let multiplexed = multiplexed.clone();
-            let mut signal_receiver = std::mem::take(&mut self.signal_receiver);
-            let handler = self.handler.clone();
-
-            NamespacedThread::spawn("node-signal-thread", move || {
-                while handler.is_running() {
-                    if let Some(signal) = signal_receiver.receive_timeout(*SAMPLING_TIMEOUT) {
-                        let mut event_callback = multiplexed.lock();
-                        if handler.is_running() {
-                            event_callback(NodeEvent::Signal(signal));
-                        }
+                let cb = &mut |e| {
+                    if handler.is_running() {
+                        event_callback(e);
                     }
+                };
+                //
+                while handler.is_running() {
+                    network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), cb);
                 }
             })
         };
 
-        NodeTask { network_thread, signal_thread }
+        NodeTask { network_thread }
     }
 }
 
-impl<S: Send + 'static> Drop for NodeListener<S> {
+impl Drop for NodeListener {
     fn drop(&mut self) {
         //
     }
@@ -342,7 +275,6 @@ impl<S: Send + 'static> Drop for NodeListener<S> {
 #[must_use = "The NodeTask must be used or the asynchronous task will be dropped in return"]
 pub struct NodeTask {
     network_thread: NamespacedThread<()>,
-    signal_thread: NamespacedThread<()>,
 }
 
 impl NodeTask {
@@ -352,7 +284,6 @@ impl NodeTask {
     /// Calling `wait()` over an already finished task do not block.
     pub fn wait(&mut self) {
         self.network_thread.try_join();
-        self.signal_thread.try_join();
     }
 }
 
@@ -363,7 +294,7 @@ mod tests {
 
     #[test]
     fn create_node_and_drop() {
-        let (handler, _listener) = split::<()>();
+        let (handler, _listener) = split();
         assert!(handler.is_running());
         // listener dropped here.
     }
@@ -372,7 +303,8 @@ mod tests {
     fn sync_node() {
         let (handler, listener) = split();
         assert!(handler.is_running());
-        handler.signals().send_with_timer((), Duration::from_millis(1000));
+
+        handler.commands().post(handler.waker(), WakerCommand::Stop);
 
         let inner_handler = handler.clone();
         listener.for_each(move |_| inner_handler.stop());
@@ -384,30 +316,25 @@ mod tests {
     fn async_node() {
         let (handler, listener) = split();
         assert!(handler.is_running());
-        handler.signals().send_with_timer("check", Duration::from_millis(250));
 
-        let checked = Arc::new(AtomicBool::new(false));
-        let inner_checked = checked.clone();
         let inner_handler = handler.clone();
-        let _node_task = listener.for_each_async(move |event| match event.signal() {
-            "stop" => inner_handler.stop(),
-            "check" => inner_checked.store(true, Ordering::Relaxed),
+        let _node_task = listener.for_each_async(move |event| match event.waker() {
+            WakerCommand::Stop => inner_handler.stop(),
             _ => unreachable!(),
         });
 
         // Since here `NodeTask` is living, the node is considered running.
         assert!(handler.is_running());
         std::thread::sleep(Duration::from_millis(500));
-        assert!(checked.load(Ordering::Relaxed));
         assert!(handler.is_running());
-        handler.signals().send("stop");
+        handler.commands().post(handler.waker(), WakerCommand::Stop);
     }
 
     #[test]
     fn wait_task() {
         let (handler, listener) = split();
 
-        handler.signals().send_with_timer((), Duration::from_millis(1000));
+        handler.commands().post(handler.waker(), WakerCommand::Stop);
 
         let inner_handler = handler.clone();
         listener.for_each_async(move |_| inner_handler.stop()).wait();
@@ -419,7 +346,7 @@ mod tests {
     fn wait_already_waited_task() {
         let (handler, listener) = split();
 
-        handler.signals().send_with_timer((), Duration::from_millis(1000));
+        handler.commands().post(handler.waker(), WakerCommand::Stop);
 
         let inner_handler = handler.clone();
         let mut task = listener.for_each_async(move |_| inner_handler.stop());

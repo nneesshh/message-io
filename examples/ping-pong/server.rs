@@ -4,6 +4,7 @@ use message_io::network::{Endpoint, NetEvent, Transport};
 use message_io::node::{self};
 
 use hashbrown::HashMap;
+use net_packet::take_packet;
 use std::net::SocketAddr;
 
 struct ClientInfo {
@@ -11,7 +12,7 @@ struct ClientInfo {
 }
 
 pub fn run(transport: Transport, addr: SocketAddr) {
-    let (handler, listener) = node::split::<()>();
+    let (handler, listener) = node::split();
 
     let mut clients: HashMap<Endpoint, ClientInfo> = HashMap::new();
 
@@ -45,7 +46,9 @@ pub fn run(transport: Transport, addr: SocketAddr) {
                         }
                     };
                     let output_data = bincode::serialize(&message).unwrap();
-                    handler.network().send(endpoint, &output_data);
+                    let mut buffer = take_packet(output_data.len());
+            buffer.append_slice(&output_data.as_slice());
+                    handler.network().send(endpoint, buffer);
                 }
             }
         }

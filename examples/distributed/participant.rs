@@ -4,12 +4,13 @@ use message_io::network::{Endpoint, NetEvent, Transport};
 use message_io::node::{self, NodeHandler, NodeListener};
 
 use hashbrown::HashMap;
+use net_packet::take_packet;
 use std::io::{self};
 use std::net::SocketAddr;
 
 pub struct Participant {
-    handler: NodeHandler<()>,
-    node_listener: Option<NodeListener<()>>,
+    handler: NodeHandler,
+    node_listener: Option<NodeListener>,
     name: String,
     discovery_endpoint: Endpoint,
     public_addr: SocketAddr,
@@ -50,7 +51,9 @@ impl Participant {
                         let message =
                             Message::RegisterParticipant(self.name.clone(), self.public_addr);
                         let output_data = bincode::serialize(&message).unwrap();
-                        self.handler.network().send(self.discovery_endpoint, &output_data);
+                        let mut buffer = take_packet(output_data.len());
+                        buffer.append_slice(&output_data.as_slice());
+                        self.handler.network().send(self.discovery_endpoint, buffer);
                     } else {
                         println!("Can not connect to the discovery server");
                     }
@@ -61,7 +64,9 @@ impl Participant {
                         let greetings = format!("Hi '{}', {}", name, message);
                         let message = Message::Greetings(self.name.clone(), greetings);
                         let output_data = bincode::serialize(&message).unwrap();
-                        self.handler.network().send(endpoint, &output_data);
+                        let mut buffer = take_packet(output_data.len());
+            buffer.append_slice(&output_data.as_slice());
+                        self.handler.network().send(endpoint, buffer);
                         self.known_participants.insert(name.clone(), endpoint);
                     }
                 }

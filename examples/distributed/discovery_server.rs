@@ -4,6 +4,7 @@ use message_io::network::{Endpoint, NetEvent, Transport};
 use message_io::node::{self, NodeHandler, NodeListener};
 
 use hashbrown::HashMap;
+use net_packet::take_packet;
 use std::io::{self};
 use std::net::SocketAddr;
 
@@ -13,14 +14,14 @@ struct ParticipantInfo {
 }
 
 pub struct DiscoveryServer {
-    handler: NodeHandler<()>,
-    node_listener: Option<NodeListener<()>>,
+    handler: NodeHandler,
+    node_listener: Option<NodeListener>,
     participants: HashMap<String, ParticipantInfo>,
 }
 
 impl DiscoveryServer {
     pub fn new() -> io::Result<DiscoveryServer> {
-        let (handler, node_listener) = node::split::<()>();
+        let (handler, node_listener) = node::split();
 
         let listen_addr = "127.0.0.1:5000";
         handler.network().listen(Transport::Tcp, listen_addr)?;
@@ -73,13 +74,17 @@ impl DiscoveryServer {
 
             let message = Message::ParticipantList(list);
             let output_data = bincode::serialize(&message).unwrap();
-            self.handler.network().send(endpoint, &output_data);
+            let mut buffer = take_packet(output_data.len());
+            buffer.append_slice(&output_data.as_slice());
+            self.handler.network().send(endpoint, buffer);
 
             // Notify other participants about this new participant
             let message = Message::ParticipantNotificationAdded(name.to_string(), addr);
             let output_data = bincode::serialize(&message).unwrap();
             for participant in &mut self.participants {
-                self.handler.network().send(participant.1.endpoint, &output_data);
+                let mut buffer = take_packet(output_data.len());
+                buffer.append_slice(&output_data.as_slice());
+                self.handler.network().send(participant.1.endpoint, buffer);
             }
 
             // Register participant
@@ -99,7 +104,9 @@ impl DiscoveryServer {
             let message = Message::ParticipantNotificationRemoved(name.to_string());
             let output_data = bincode::serialize(&message).unwrap();
             for participant in &mut self.participants {
-                self.handler.network().send(participant.1.endpoint, &output_data);
+                let mut buffer = take_packet(output_data.len());
+                buffer.append_slice(&output_data.as_slice());
+                self.handler.network().send(participant.1.endpoint, buffer);
             }
             println!("Removed participant '{}' with ip {}", name, info.addr);
         } else {

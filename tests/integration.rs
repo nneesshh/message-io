@@ -1,7 +1,8 @@
-use message_io::network::{NetEvent, SendStatus, Transport};
+use message_io::network::{NetEvent, Transport};
 use message_io::node::{self, NodeEvent};
 use message_io::util::thread::NamespacedThread;
 
+use net_packet::take_packet;
 use test_case::test_case;
 
 use rand::{Rng, SeedableRng};
@@ -73,13 +74,12 @@ fn start_echo_server(
         let mut clients = HashSet::new();
 
         let (node, listener) = node::split();
-        node.signals().send_with_timer((), *TIMEOUT);
 
         let (listener_id, server_addr) = node.network().listen(transport, LOCAL_ADDR).unwrap();
         tx.send(server_addr).unwrap();
 
         listener.for_each(move |event| match event {
-            NodeEvent::Signal(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
+            NodeEvent::Waker(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
             NodeEvent::Network(net_event) => match net_event {
                 NetEvent::Connected(..) => unreachable!(),
                 NetEvent::Accepted(endpoint, id) => {
@@ -92,8 +92,7 @@ fn start_echo_server(
                 NetEvent::Message(endpoint, data) => {
                     assert_eq!(MIN_MESSAGE, data.peek());
 
-                    let status = node.network().send(endpoint, data.peek());
-                    assert_eq!(SendStatus::Sent, status);
+                    node.network().send(endpoint, data);
 
                     messages_received += 1;
 
@@ -136,7 +135,6 @@ fn start_echo_client_manager(
 ) -> NamespacedThread<()> {
     NamespacedThread::spawn("test-client", move || {
         let (node, listener) = node::split();
-        node.signals().send_with_timer((), *TIMEOUT);
 
         let mut clients = HashSet::new();
         let mut received = 0;
@@ -146,12 +144,13 @@ fn start_echo_client_manager(
         }
 
         listener.for_each(move |event| match event {
-            NodeEvent::Signal(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
+            NodeEvent::Waker(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
             NodeEvent::Network(net_event) => match net_event {
                 NetEvent::Connected(server, status) => {
                     assert!(status);
-                    let status = node.network().send(server, MIN_MESSAGE);
-                    assert_eq!(SendStatus::Sent, status);
+                    let mut buffer = take_packet(MIN_MESSAGE.len());
+                    buffer.append_slice(MIN_MESSAGE);
+                    node.network().send(server, buffer);
                     assert!(clients.insert(server));
                 }
                 NetEvent::Message(endpoint, data) => {
@@ -192,7 +191,6 @@ fn message_size(transport: Transport, message_size: usize) {
     let sent_message: Vec<u8> = (0..message_size).map(|_| rng.gen()).collect();
 
     let (node, listener) = node::split();
-    node.signals().send_with_timer((), *TIMEOUT);
 
     let (_, receiver_addr) = node.network().listen(transport, LOCAL_ADDR).unwrap();
     let (receiver, _) = node.network().connect(transport, receiver_addr).unwrap();
@@ -201,7 +199,7 @@ fn message_size(transport: Transport, message_size: usize) {
     let mut received_message = Vec::new();
 
     listener.for_each(move |event| match event {
-        NodeEvent::Signal(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
+        NodeEvent::Waker(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
         NodeEvent::Network(net_event) => match net_event {
             NetEvent::Connected(endpoint, status) => {
                 assert!(status);
@@ -213,8 +211,10 @@ fn message_size(transport: Transport, message_size: usize) {
                 // Protocols as TCP blocks the sender if the receiver is not reading data
                 // and its buffer is fill.
                 _async_sender = Some(NamespacedThread::spawn("test-sender", move || {
-                    let status = node.network().send(receiver, &sent_message);
-                    assert_eq!(status, SendStatus::Sent);
+                    let mut buffer = take_packet(sent_message.len());
+                    buffer.append_slice(&sent_message.as_slice());
+                    node.network().send(receiver, buffer);
+                    std::thread::sleep(std::time::Duration::from_secs(5));
                     assert!(node.network().remove(receiver.resource_id()));
                 }));
             }

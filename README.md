@@ -104,7 +104,7 @@ fn main() {
     // Create a node, the main message-io entity. It is divided in 2 parts:
     // The 'handler', used to make actions (connect, send messages, signals, stop the node...)
     // The 'listener', used to read events from the network or signals.
-    let (handler, listener) = node::split::<()>();
+    let (handler, listener) = node::split();
 
     // Listen for TCP and WebSocket messages at the same time.
     handler.network().listen(Transport::Tcp, "0.0.0.0:3042").unwrap();
@@ -119,7 +119,7 @@ fn main() {
         NetEvent::Accepted(_endpoint, _listener) => println!("Client connected"), // Tcp or Ws
         NetEvent::Message(endpoint, input_buffer) => {
             println!("Received: {}", String::from_utf8_lossy(input_buffer.peek()));
-            handler.network().send(endpoint, input_buffer.peek());
+            handler.network().send(endpoint, input_buffer);
         },
         NetEvent::Disconnected(_endpoint) => println!("Client disconnected"), //Tcp or Ws
     });
@@ -141,7 +141,7 @@ enum Signal {
 }
 
 fn main() {
-    let (handler, listener) = node::split::<Signal>();
+    let (handler, listener) = node::split();
 
     // transport is Ws (WebSocket).
     #[cfg(feature = "websocket")]

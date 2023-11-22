@@ -5,6 +5,10 @@
 // Tells rustdoc where is the README to compile and test the rust code found there
 doc_comment::doctest!("../README.md");
 
+///
+mod waker_command;
+pub use waker_command::WakerCommand;
+
 /// Adapter related information.
 /// If some adapter has special values or configuration, it is specified here.
 pub mod adapters;
