@@ -11,10 +11,8 @@ use super::SendStatus;
 
 use std::io::{self};
 use std::net::SocketAddr;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(doctest)]
 use super::transport::Transport;
@@ -73,11 +71,19 @@ impl std::fmt::Debug for NetEvent {
     }
 }
 
-pub trait EventProcessor: Send + Sync {
+pub trait EventProcessor {
     fn process_read(&mut self, id: ResourceId, callback: &mut dyn FnMut(NetEvent));
     fn process_write(&mut self, id: ResourceId, callback: &mut dyn FnMut(NetEvent));
-    fn process_connect(&mut self, config: TransportConnect, addr: RemoteAddr) -> io::Result<(Endpoint, SocketAddr)>;
-    fn process_listen(&mut self, config: TransportListen, addr: SocketAddr)->io::Result<(ResourceId, SocketAddr)>;
+    fn process_connect(
+        &mut self,
+        config: TransportConnect,
+        addr: RemoteAddr,
+    ) -> io::Result<(Endpoint, SocketAddr)>;
+    fn process_listen(
+        &mut self,
+        config: TransportListen,
+        addr: SocketAddr,
+    ) -> io::Result<(ResourceId, SocketAddr)>;
     fn process_send(&mut self, endpoint: Endpoint, buffer: NetPacketGuard) -> SendStatus;
     fn process_close(&mut self, id: ResourceId) -> bool;
 }
@@ -90,11 +96,7 @@ struct RemoteProperties {
 
 impl RemoteProperties {
     fn new(peer_addr: SocketAddr, local: Option<ResourceId>) -> Self {
-        Self {
-            peer_addr,
-            local,
-            ready: AtomicBool::new(false),
-        }
+        Self { peer_addr, local, ready: AtomicBool::new(false) }
     }
 
     pub fn is_ready(&self) -> bool {
@@ -198,7 +200,11 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             }
         }
     }
-    fn process_connect(&mut self, config: TransportConnect, addr: RemoteAddr) -> io::Result<(Endpoint, SocketAddr)> {
+    fn process_connect(
+        &mut self,
+        config: TransportConnect,
+        addr: RemoteAddr,
+    ) -> io::Result<(Endpoint, SocketAddr)> {
         let ret = R::connect_with(config, addr).map(|info| {
             let id = self.remote_registry.register(
                 info.remote,
@@ -212,11 +218,13 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             (endpoint, addr)
         })
     }
-    fn process_listen(&mut self, config: TransportListen, addr: SocketAddr) -> io::Result<(ResourceId, SocketAddr)> {
+    fn process_listen(
+        &mut self,
+        config: TransportListen,
+        addr: SocketAddr,
+    ) -> io::Result<(ResourceId, SocketAddr)> {
         let ret = L::listen_with(config, addr).map(|info| {
-            let id = self
-                .local_registry
-                .register(info.local, LocalProperties, false);
+            let id = self.local_registry.register(info.local, LocalProperties, false);
             (id, info.local_addr)
         });
         ret.map(|(resource_id, addr)| {
@@ -261,7 +269,7 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
 impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
     fn resolve_pending_remote(
         &self,
-        remote: &Arc<Register<R, RemoteProperties>>,
+        remote: &mut Rc<Register<R, RemoteProperties>>,
         endpoint: Endpoint,
         mut event_callback: impl FnMut(NetEvent),
     ) {
@@ -288,7 +296,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
 
     fn write_to_remote(
         &self,
-        remote: &Arc<Register<R, RemoteProperties>>,
+        remote: &mut Rc<Register<R, RemoteProperties>>,
         endpoint: Endpoint,
         mut event_callback: impl FnMut(NetEvent),
     ) {
@@ -299,13 +307,12 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
 
     fn read_from_remote(
         &self,
-        remote: &Arc<Register<R, RemoteProperties>>,
+        remote: &mut Rc<Register<R, RemoteProperties>>,
         endpoint: Endpoint,
         mut event_callback: impl FnMut(NetEvent),
     ) {
-        let status = remote
-            .resource
-            .receive(|data| event_callback(NetEvent::Message(endpoint, data)));
+        let status =
+            remote.resource.receive(|data| event_callback(NetEvent::Message(endpoint, data)));
         log::trace!("Receive status: {:?}", status);
         if let ReadStatus::Disconnected = status {
             // Checked because, the user in the callback could have removed the same resource.
@@ -317,7 +324,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
 
     fn read_from_local(
         &self,
-        local: &Arc<Register<L, LocalProperties>>,
+        local: &mut Rc<Register<L, LocalProperties>>,
         id: ResourceId,
         mut event_callback: impl FnMut(NetEvent),
     ) {

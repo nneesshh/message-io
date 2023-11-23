@@ -25,7 +25,7 @@ impl Endpoint {
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::{Transport, Endpoint, NetEvent};
     ///
-    /// let (handler, listener) = node::split();
+    /// let (engine, handler) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1)); //timeout
     ///
     /// let listen_addr = "127.0.0.1:0";

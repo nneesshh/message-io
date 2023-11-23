@@ -73,17 +73,23 @@ fn start_echo_server(
         let mut disconnections = 0;
         let mut clients = HashSet::new();
 
-        let (node, listener) = node::split();
+        let (engine, handler) = node::split();
 
-        let (listener_id, server_addr) = node.network().listen(transport, LOCAL_ADDR).unwrap();
-        tx.send(server_addr).unwrap();
+         handler.network().listen(transport, LOCAL_ADDR, Box::new(move |ret| {
+            //
+            if let Ok((_listenr_id, server_addr)) = ret {
+                tx.send(server_addr).unwrap();
+            }
+         }));
 
-        listener.for_each(move |event| match event {
+         let handler2 = handler.clone();
+        let mut listener_id_opt = None;
+        let _node_task =node::node_listener_for_each_async(engine, &handler, move |event| match event {
             NodeEvent::Waker(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
             NodeEvent::Network(net_event) => match net_event {
                 NetEvent::Connected(..) => unreachable!(),
                 NetEvent::Accepted(endpoint, id) => {
-                    assert_eq!(listener_id, id);
+                    listener_id_opt = Some(id);
                     match transport.is_connection_oriented() {
                         true => assert!(clients.insert(endpoint)),
                         false => unreachable!(),
@@ -92,7 +98,7 @@ fn start_echo_server(
                 NetEvent::Message(endpoint, data) => {
                     assert_eq!(MIN_MESSAGE, data.peek());
 
-                    node.network().send(endpoint, data);
+                    handler2.network().send(endpoint, data);
 
                     messages_received += 1;
 
@@ -100,9 +106,10 @@ fn start_echo_server(
                         // We assume here that if the protocol is not
                         // connection-oriented it will no create a resource.
                         // The remote will be managed from the listener resource
+                        let listener_id = listener_id_opt.unwrap();
                         assert_eq!(listener_id, endpoint.resource_id());
                         if messages_received == expected_clients {
-                            node.stop() //Exit from thread.
+                            handler2.stop() //Exit from thread.
                         }
                     }
                 }
@@ -114,7 +121,7 @@ fn start_echo_server(
                             if disconnections == expected_clients {
                                 assert_eq!(expected_clients, messages_received);
                                 assert_eq!(0, clients.len());
-                                node.stop() //Exit from thread.
+                                handler2.stop() //Exit from thread.
                             }
                         }
                         false => unreachable!(),
@@ -134,39 +141,40 @@ fn start_echo_client_manager(
     clients_number: usize,
 ) -> NamespacedThread<()> {
     NamespacedThread::spawn("test-client", move || {
-        let (node, listener) = node::split();
+        let (engine, handler) = node::split();
 
         let mut clients = HashSet::new();
         let mut received = 0;
 
         for _ in 0..clients_number {
-            node.network().connect(transport, server_addr).unwrap();
+            handler.network().connect(transport, server_addr, Box::new(|_|{}));
         }
 
-        listener.for_each(move |event| match event {
+        let handler2 = handler.clone();
+        let _node_task =node::node_listener_for_each_async(engine, &handler, Box::new(move |event| match event {
             NodeEvent::Waker(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
             NodeEvent::Network(net_event) => match net_event {
                 NetEvent::Connected(server, status) => {
                     assert!(status);
                     let mut buffer = take_packet(MIN_MESSAGE.len());
                     buffer.append_slice(MIN_MESSAGE);
-                    node.network().send(server, buffer);
+                    handler2.network().send(server, buffer);
                     assert!(clients.insert(server));
                 }
                 NetEvent::Message(endpoint, data) => {
                     assert!(clients.remove(&endpoint));
                     assert_eq!(MIN_MESSAGE, data.peek());
-                    node.network().remove(endpoint.resource_id());
+                    handler2.network().close(endpoint.resource_id());
 
                     received += 1;
                     if received == clients_number {
-                        node.stop(); //Exit from thread.
+                        handler2.stop(); //Exit from thread.
                     }
                 }
                 NetEvent::Accepted(..) => unreachable!(),
                 NetEvent::Disconnected(_) => unreachable!(),
             },
-        });
+        }));
     })
 }
 
@@ -190,32 +198,37 @@ fn message_size(transport: Transport, message_size: usize) {
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
     let sent_message: Vec<u8> = (0..message_size).map(|_| rng.gen()).collect();
 
-    let (node, listener) = node::split();
+    let (engine, handler) = node::split();
 
-    let (_, receiver_addr) = node.network().listen(transport, LOCAL_ADDR).unwrap();
-    let (receiver, _) = node.network().connect(transport, receiver_addr).unwrap();
+    let handler2 = handler.clone();
+    handler.network().listen(transport, LOCAL_ADDR, move |ret| {
+        //
+        if let Ok((_, receiver_addr)) = ret {
+            handler2.network().connect(transport, receiver_addr, Box::new(|_|{}));
+        }
+    });
 
     let mut _async_sender: Option<NamespacedThread<()>> = None;
     let mut received_message = Vec::new();
 
-    listener.for_each(move |event| match event {
+    let handler3 = handler.clone();
+    let mut task = node::node_listener_for_each_async(engine, &handler, move |event| match event {
         NodeEvent::Waker(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
         NodeEvent::Network(net_event) => match net_event {
-            NetEvent::Connected(endpoint, status) => {
+            NetEvent::Connected(receiver, status) => {
                 assert!(status);
-                assert_eq!(receiver, endpoint);
 
-                let node = node.clone();
                 let sent_message = sent_message.clone();
 
                 // Protocols as TCP blocks the sender if the receiver is not reading data
                 // and its buffer is fill.
+                let handler4 = handler3.clone();
                 _async_sender = Some(NamespacedThread::spawn("test-sender", move || {
                     let mut buffer = take_packet(sent_message.len());
                     buffer.append_slice(&sent_message.as_slice());
-                    node.network().send(receiver, buffer);
+                    handler4.network().send(receiver, buffer);
                     std::thread::sleep(std::time::Duration::from_secs(5));
-                    assert!(node.network().remove(receiver.resource_id()));
+                    handler4.network().close(receiver.resource_id());
                 }));
             }
             NetEvent::Accepted(..) => (),
@@ -223,7 +236,7 @@ fn message_size(transport: Transport, message_size: usize) {
                 if transport.is_packet_based() {
                     received_message = data.peek().to_vec();
                     assert_eq!(sent_message, received_message);
-                    node.stop();
+                    handler3.stop();
                 } else {
                     received_message.extend_from_slice(data.peek());
                 }
@@ -231,8 +244,9 @@ fn message_size(transport: Transport, message_size: usize) {
             NetEvent::Disconnected(_) => {
                 assert_eq!(sent_message.len(), received_message.len());
                 assert_eq!(sent_message, received_message);
-                node.stop();
+                handler3.stop();
             }
         },
     });
+    task.wait();
 }

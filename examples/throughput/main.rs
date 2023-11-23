@@ -30,53 +30,55 @@ fn throughput_message_io(transport: Transport, packet_size: usize) {
     print!("message-io {}:  \t", transport);
     std::io::stdout().flush().unwrap();
 
-    let (handler, listener) = node::split();
+    let (engine, handler) = node::split();
     let message = (0..packet_size).map(|_| 0xFF).collect::<Vec<u8>>();
-
-    let (_, addr) = handler.network().listen(transport, "127.0.0.1:0").unwrap();
-    let (endpoint, _) = handler.network().connect(transport, addr).unwrap();
 
     let (t_ready, r_ready) = mpsc::channel();
     let (t_time, r_time) = mpsc::channel();
 
+    let handler2 = handler.clone();
+    let _ = std::thread::spawn(move || {
+        let (_listener_id, addr) = handler2.network().listen_sync(transport, "127.0.0.1:0").unwrap();
+        let (endpoint, _) = handler2.network().connect_sync(transport, addr).unwrap();
+
+        if transport.is_connection_oriented() {
+            r_ready.recv().unwrap();
+        }
+    
+        // Ensure that the connection is performed,
+        // the internal thread is initialized for not oriented connection protocols
+        // and we are waiting in the internal poll for data.
+        std::thread::sleep(Duration::from_millis(100));
+    
+        let start_time = Instant::now();
+        while handler2.is_running() {
+            let mut buffer = take_packet(message.len());
+            buffer.append_slice(message.as_slice());
+            handler2.network().send(endpoint, buffer);
+        }
+    
+        let end_time = r_time.recv().unwrap();
+        let elapsed = end_time - start_time;
+        println!("Throughput: {}", ThroughputMeasure(EXPECTED_BYTES, elapsed));
+    });
+
     let mut task = {
         let mut received_bytes = 0;
-        let handler = handler.clone();
+        let handler3 = handler.clone();
 
-        listener.for_each_async(move |event| match event.network() {
+        node::node_listener_for_each_async(engine, &handler, move |event| match event.network() {
             NetEvent::Connected(_, _) => (),
             NetEvent::Accepted(_, _) => t_ready.send(()).unwrap(),
             NetEvent::Message(_, data) => {
                 received_bytes += data.peek().len();
                 if received_bytes >= EXPECTED_BYTES {
-                    handler.stop();
+                    handler3.stop();
                     t_time.send(Instant::now()).unwrap();
                 }
             }
             NetEvent::Disconnected(_) => (),
         })
     };
-
-    if transport.is_connection_oriented() {
-        r_ready.recv().unwrap();
-    }
-
-    // Ensure that the connection is performed,
-    // the internal thread is initialized for not oriented connection protocols
-    // and we are waiting in the internal poll for data.
-    std::thread::sleep(Duration::from_millis(100));
-
-    let start_time = Instant::now();
-    while handler.is_running() {
-        let mut buffer = take_packet(message.len());
-        buffer.append_slice(message.as_slice());
-        handler.network().send(endpoint, buffer);
-    }
-
-    let end_time = r_time.recv().unwrap();
-    let elapsed = end_time - start_time;
-    println!("Throughput: {}", ThroughputMeasure(EXPECTED_BYTES, elapsed));
-
     task.wait();
 }
 

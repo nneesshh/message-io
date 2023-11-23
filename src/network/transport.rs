@@ -1,5 +1,3 @@
-use super::loader::DriverLoader;
-
 #[cfg(feature = "tcp")]
 use crate::adapters::tcp::{TcpAdapter, TcpConnectConfig, TcpListenConfig};
 /*#[cfg(feature = "tcp")]
@@ -15,6 +13,8 @@ use crate::adapters::ws::{self, WsAdapter};
  */
 
 use serde::{Deserialize, Serialize};
+
+use super::{loader::EventProcessorList, PollEngine};
 
 /// Enum to identified the underlying transport used.
 /// It can be passed to
@@ -64,20 +64,20 @@ pub enum Transport {
 impl Transport {
     /// Associates an adapter.
     /// This method mounts the adapters to be used in the network instance.
-    pub fn mount_adapter(self, loader: &mut DriverLoader) {
+    pub fn mount_adapter(self, engine: &mut PollEngine, processors: &mut EventProcessorList) {
         match self {
             #[cfg(feature = "tcp")]
-            Self::Tcp => loader.mount(self.id(), TcpAdapter),
+            Self::Tcp => engine.mount(self.id(), TcpAdapter, processors),
             /*#[cfg(feature = "tcp")]
-            Self::FramedTcp => loader.mount(self.id(), FramedTcpAdapter),
+            Self::FramedTcp => engine.mount(self.id(), FramedTcpAdapter, processors),
             #[cfg(feature = "udp")]
-            Self::Udp => loader.mount(self.id(), UdpAdapter),
+            Self::Udp => engine.mount(self.id(), UdpAdapter, processors),
 
              */
             #[cfg(feature = "ssl")]
-            Self::Ssl => loader.mount(self.id(), SslAdapter),
+            Self::Ssl => engine.mount(self.id(), SslAdapter, processors),
             /*#[cfg(feature = "websocket")]
-            Self::Ws => loader.mount(self.id(), WsAdapter),
+            Self::Ws => engine.mount(self.id(), WsAdapter, processors),
 
              */
         };

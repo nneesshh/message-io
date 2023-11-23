@@ -104,7 +104,7 @@ fn main() {
     // Create a node, the main message-io entity. It is divided in 2 parts:
     // The 'handler', used to make actions (connect, send messages, signals, stop the node...)
     // The 'listener', used to read events from the network or signals.
-    let (handler, listener) = node::split();
+    let (engine, handler) = node::split();
 
     // Listen for TCP and WebSocket messages at the same time.
     handler.network().listen(Transport::Tcp, "0.0.0.0:3042").unwrap();
@@ -141,7 +141,7 @@ enum Signal {
 }
 
 fn main() {
-    let (handler, listener) = node::split();
+    let (engine, handler) = node::split();
 
     // transport is Ws (WebSocket).
     #[cfg(feature = "websocket")]

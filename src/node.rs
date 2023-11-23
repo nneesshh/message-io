@@ -1,5 +1,5 @@
-use crate::events::{self, EventSender};
-use crate::network::{self, NetEvent, NetworkController, NetworkProcessor, PollWaker};
+use crate::events::EventSender;
+use crate::network::{self, NetEvent, NetworkController, PollEngine, PollWaker};
 use crate::util::thread::NamespacedThread;
 use crate::WakerCommand;
 
@@ -13,7 +13,7 @@ lazy_static::lazy_static! {
     static ref SAMPLING_TIMEOUT: Duration = Duration::from_millis(5);
 }
 
-/// Event returned by [`NodeListener::for_each()`] and [`NodeListener::for_each_async()`]
+/// Event returned by [`node_listener_for_each_async()`]
 /// when some network event or signal is received.
 pub enum NodeEvent {
     /// The `NodeEvent` is an event that comes from the network.
@@ -52,43 +52,20 @@ impl NodeEvent {
     }
 }
 
-/// Creates a node already working.
-/// This function offers two instances: a [`NodeHandler`] to perform network and commands actions
-/// and a [`NodeListener`] to receive the events the node receives.
 ///
-/// Note that [`NodeListener`] is already listen for events from its creation.
-/// In order to get the listened events you can call [`NodeListener::for_each()`]
-/// Any event happened before `for_each()` call will be also dispatched.
-///
-/// # Examples
-/// ```rust,no_run
-/// use message_io::node::{self, NodeEvent};
-///
-/// let (handler, listener) = node::split();
-///
-/// listener.for_each(move |event| match event {
-///     NodeEvent::Network(_) => { /* ... */ },
-///     NodeEvent::Waker(command) => handler.stop(), //Received after 1 sec
-/// });
-/// ```
-///
-/// In case you don't use commands, specify the node type with an unit (`()`) type.
-/// ```
-/// use message_io::node::{self};
-///
-/// let (handler, listener) = node::split();
-/// ```
-pub fn split() -> (NodeHandler, NodeListener) {
-    let (command_sender, command_receiver) = events::split();
-    let (network_controller, network_processor) = network::split(command_sender, command_receiver);
+pub fn split() -> (PollEngine, NodeHandler) {
+    let engine = PollEngine::default();
+    let handler = create_node_handler(&engine);
+    (engine, handler)
+}
 
+///
+pub fn create_node_handler(engine: &PollEngine) -> NodeHandler {
+    let command_sender = engine.command_sender().clone();
+    let waker = engine.poll().create_waker();
+    let controller = NetworkController::new(command_sender, waker);
     let running = AtomicBool::new(true);
-
-    let handler = NodeHandler(Arc::new(NodeHandlerImpl { network: network_controller, running }));
-
-    let listener = NodeListener::new(network_processor, handler.clone());
-
-    (handler, listener)
+    NodeHandler(Arc::new(NodeHandlerImpl { network: controller, running }))
 }
 
 struct NodeHandlerImpl {
@@ -124,14 +101,14 @@ impl NodeHandler {
     }
 
     /// Finalizes the [`NodeListener`].
-    /// After this call, no more events will be processed by [`NodeListener::for_each()`].
+    /// After this call, no more events will be processed by [`node_listener_for_each_async()`].
     pub fn stop(&self) {
         self.0.running.store(false, Ordering::Relaxed);
     }
 
     /// Check if the node is running.
     /// Note that the node is running and listening events from its creation,
-    /// not only once you call to [`NodeListener::for_each()`].
+    /// not only once you call to [`node_listener_for_each_async()`].
     #[inline(always)]
     pub fn is_running(&self) -> bool {
         self.0.running.load(Ordering::Relaxed)
@@ -144,130 +121,73 @@ impl Clone for NodeHandler {
     }
 }
 
-/// Listen events for network and command from user.
-pub struct NodeListener {
-    network_processor_opt: Option<NetworkProcessor>,
-    handler: NodeHandler,
-}
-
-impl NodeListener {
-    fn new(network_processor: NetworkProcessor, handler: NodeHandler) -> NodeListener {
+/// NodeListener: Listen events for network and command from user.
+/// It iterates indefinitely over all generated `NetEvent`, and returns the control to the user
+/// after calling it. The events will be processed asynchronously.
+/// A `NodeTask` representing this asynchronous job is returned.
+/// Destroying this object will result in blocking the current thread until
+/// [`NodeHandler::stop()`] is called.
+///
+/// In order to allow the node working asynchronously, you can move the `NodeTask` to a
+/// an object with a longer lifetime.
+///
+/// # Example
+/// ```rust,no_run
+/// use message_io::node::{self, NodeEvent};
+/// use message_io::network::Transport;
+///
+/// let (engine, handler) = node::split();
+///
+/// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
+///
+/// let task = node::node_listener_for_each_async(engine, handler, move |event| match event {
+///      NodeEvent::Network(net_event) => { /* Your logic here */ },
+///      NodeEvent::Waker(_) => handler.stop(),
+/// });
+/// // for_each_async() will act asynchronous during 'task' lifetime.
+///
+/// // ...
+/// println!("Node is running");
+/// // ...
+///
+/// drop(task); // Blocked here until handler.stop() is called (1 sec).
+/// // Also task.wait(); can be called doing the same (but taking a mutable reference).
+///
+/// println!("Node is stopped");
+/// ```
+pub fn node_listener_for_each_async<F>(
+    engine: PollEngine,
+    handler: &NodeHandler,
+    mut event_callback: F,
+) -> NodeTask
+where
+    F: FnMut(NodeEvent) + Send + 'static,
+{
+    //
+    let handler = handler.clone();
+    let network_thread = {
         //
-        NodeListener { network_processor_opt: Some(network_processor), handler }
-    }
-
-    /// Iterate indefinitely over all generated `NetEvent`.
-    /// This function will work until [`NodeHandler::stop()`] is called.
-    ///
-    /// Note that any events generated before calling this function (e.g. some connection was done)
-    /// will be stored and offered once you call `for_each()`.
-    /// # Example
-    /// ```rust,no_run
-    /// use message_io::node::{self, NodeEvent};
-    /// use message_io::network::Transport;
-    ///
-    /// let (handler, listener) = node::split();
-    ///
-    /// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
-    ///
-    /// listener.for_each(move |event| match event {
-    ///     NodeEvent::Network(net_event) => { /* Your logic here */ },
-    ///     NodeEvent::Waker(_) => handler.stop(),
-    /// });
-    /// // Blocked here until handler.stop() is called (1 sec).
-    /// println!("Node is stopped");
-    /// ```
-    pub fn for_each(mut self, mut event_callback: impl FnMut(NodeEvent) + Send) {
-        //
-        crossbeam_utils::thread::scope(|_| {
+        NamespacedThread::spawn("node-network-thread", move || {
             //
-            let mut network_processor = self.network_processor_opt.take().unwrap();
+            let mut network_processor = network::create_processor(engine);
 
+            //
+            let handler2 = handler.clone();
             let cb = &mut |e| {
-                if self.handler.is_running() {
+                if handler2.is_running() {
                     event_callback(e);
                 }
             };
-
-            //
-            while self.handler.is_running() {
+            while handler.is_running() {
                 network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), cb);
             }
         })
-        .unwrap();
-    }
+    };
 
-    /// Similar to [`NodeListener::for_each()`] but it returns the control to the user
-    /// after calling it. The events will be processed asynchronously.
-    /// A `NodeTask` representing this asynchronous job is returned.
-    /// Destroying this object will result in blocking the current thread until
-    /// [`NodeHandler::stop()`] is called.
-    ///
-    /// In order to allow the node working asynchronously, you can move the `NodeTask` to a
-    /// an object with a longer lifetime.
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// use message_io::node::{self, NodeEvent};
-    /// use message_io::network::Transport;
-    ///
-    /// let (handler, listener) = node::split();
-    ///
-    /// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
-    ///
-    /// let task = listener.for_each_async(move |event| match event {
-    ///      NodeEvent::Network(net_event) => { /* Your logic here */ },
-    ///      NodeEvent::Waker(_) => handler.stop(),
-    /// });
-    /// // for_each_async() will act asynchronous during 'task' lifetime.
-    ///
-    /// // ...
-    /// println!("Node is running");
-    /// // ...
-    ///
-    /// drop(task); // Blocked here until handler.stop() is called (1 sec).
-    /// // Also task.wait(); can be called doing the same (but taking a mutable reference).
-    ///
-    /// println!("Node is stopped");
-    /// ```
-    pub fn for_each_async(
-        mut self,
-        mut event_callback: impl FnMut(NodeEvent) + Send + 'static,
-    ) -> NodeTask {
-        //
-        let network_thread = {
-            //
-            let handler = self.handler.clone();
-
-            //
-            let mut network_processor = self.network_processor_opt.take().unwrap();
-
-            //
-            NamespacedThread::spawn("node-network-thread", move || {
-                //
-                let cb = &mut |e| {
-                    if handler.is_running() {
-                        event_callback(e);
-                    }
-                };
-                //
-                while handler.is_running() {
-                    network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), cb);
-                }
-            })
-        };
-
-        NodeTask { network_thread }
-    }
+    NodeTask { network_thread }
 }
 
-impl Drop for NodeListener {
-    fn drop(&mut self) {
-        //
-    }
-}
-
-/// Entity used to ensure the lifetime of [`NodeListener::for_each_async()`] call.
+/// Entity used to ensure the lifetime of [`node_listener_for_each_async()`] call.
 /// The node will process events asynchronously while this entity lives.
 /// The destruction of this entity will block until the task is finished.
 /// If you want to "unblock" the thread that drops this entity call to
@@ -289,67 +209,70 @@ impl NodeTask {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Duration;
 
-    #[test]
-    fn create_node_and_drop() {
-        let (handler, _listener) = split();
-        assert!(handler.is_running());
-        // listener dropped here.
-    }
+    use crate::node;
+
+    use super::*;
 
     #[test]
     fn sync_node() {
-        let (handler, listener) = split();
+        let (engine, handler) = split();
         assert!(handler.is_running());
 
         handler.commands().post(handler.waker(), WakerCommand::Stop);
 
         let inner_handler = handler.clone();
-        listener.for_each(move |_| inner_handler.stop());
+        let mut task =
+            node::node_listener_for_each_async(engine, &handler, move |_| inner_handler.stop());
 
+        task.wait();
         assert!(!handler.is_running());
     }
 
     #[test]
     fn async_node() {
-        let (handler, listener) = split();
+        let (engine, handler) = split();
         assert!(handler.is_running());
 
         let inner_handler = handler.clone();
-        let _node_task = listener.for_each_async(move |event| match event.waker() {
-            WakerCommand::Stop => inner_handler.stop(),
-            _ => unreachable!(),
-        });
+        let mut task =
+            node::node_listener_for_each_async(engine, &handler, move |event| {
+                match event.waker() {
+                    WakerCommand::Stop => inner_handler.stop(),
+                    _ => unreachable!(),
+                }
+            });
 
         // Since here `NodeTask` is living, the node is considered running.
         assert!(handler.is_running());
         std::thread::sleep(Duration::from_millis(500));
         assert!(handler.is_running());
         handler.commands().post(handler.waker(), WakerCommand::Stop);
+        task.wait();
     }
 
     #[test]
     fn wait_task() {
-        let (handler, listener) = split();
+        let (engine, handler) = split();
 
         handler.commands().post(handler.waker(), WakerCommand::Stop);
 
         let inner_handler = handler.clone();
-        listener.for_each_async(move |_| inner_handler.stop()).wait();
+        node::node_listener_for_each_async(engine, &handler, move |_| inner_handler.stop()).wait();
 
         assert!(!handler.is_running());
     }
 
     #[test]
     fn wait_already_waited_task() {
-        let (handler, listener) = split();
+        let (engine, handler) = split();
 
         handler.commands().post(handler.waker(), WakerCommand::Stop);
 
         let inner_handler = handler.clone();
-        let mut task = listener.for_each_async(move |_| inner_handler.stop());
+        let mut task =
+            node::node_listener_for_each_async(engine, &handler, move |_| inner_handler.stop());
         assert!(handler.is_running());
         task.wait();
         assert!(!handler.is_running());

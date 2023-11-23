@@ -1,15 +1,23 @@
-use std::net::SocketAddr;
 use std::io;
+use std::net::SocketAddr;
 
 use net_packet::NetPacketGuard;
 
-use crate::network::{Endpoint, ResourceId, TransportListen, RemoteAddr, TransportConnect};
+use crate::network::{Endpoint, RemoteAddr, ResourceId, TransportConnect, TransportListen};
 
 ///
 pub enum WakerCommand {
     Greet(String),
-    Connect(TransportConnect, RemoteAddr, Box<dyn FnOnce(io::Result<(Endpoint, SocketAddr)>) + Send>),
-    Listen(TransportListen, SocketAddr, Box<dyn FnOnce(io::Result<(ResourceId, SocketAddr)>) + Send>),
+    Connect(
+        TransportConnect,
+        RemoteAddr,
+        Box<dyn FnOnce(io::Result<(Endpoint, SocketAddr)>) + Send>,
+    ),
+    Listen(
+        TransportListen,
+        SocketAddr,
+        Box<dyn FnOnce(io::Result<(ResourceId, SocketAddr)>) + Send>,
+    ),
     Send(Endpoint, NetPacketGuard),
     SendTrunk, // for test only
     Close(ResourceId),

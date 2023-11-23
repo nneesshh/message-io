@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 
 /// High level trait to represent an adapter for a transport protocol.
 /// The adapter is only used to identify the resources of your adapter.
-pub trait Adapter: Send + Sync {
+pub trait Adapter {
     /// Resource type used to identify remote connections and send/receive
     /// from remote this endpoints (e.g. TcpStream)
     /// This can be considerered the resource used for client connections.
@@ -26,7 +26,7 @@ pub trait Adapter: Send + Sync {
 /// `Source` is the trait that [`mio`] uses to register in the poll in order to wake up
 /// asynchronously from events.
 /// Your [`Remote`] and [`Local`] entities must implement `Resource`.
-pub trait Resource: Send + Sync {
+pub trait Resource {
     /// Returns a mutable reference to the internal `Source`.
     /// Note: All `mio` network element implements [`Source`], you probably wants to use
     /// one of them as a base for your non-blocking transport.

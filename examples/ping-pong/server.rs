@@ -12,16 +12,20 @@ struct ClientInfo {
 }
 
 pub fn run(transport: Transport, addr: SocketAddr) {
-    let (handler, listener) = node::split();
+    let (engine, handler) = node::split();
 
     let mut clients: HashMap<Endpoint, ClientInfo> = HashMap::new();
 
-    match handler.network().listen(transport, addr) {
-        Ok((_id, real_addr)) => println!("Server running at {} by {}", real_addr, transport),
-        Err(_) => return println!("Can not listening at {} by {}", addr, transport),
-    }
+    handler.network().listen(transport, addr, move |ret| {
+        //
+        match ret {
+            Ok((_id, real_addr)) => println!("Server running at {} by {}", real_addr, transport),
+            Err(_) => return println!("Can not listening at {} by {}", addr, transport),
+        }
+    });
 
-    listener.for_each(move |event| match event.network() {
+    let handler2 = handler.clone();
+    let mut task = node::node_listener_for_each_async(engine, &handler, move |event| match event.network() {
         NetEvent::Connected(_, _) => (), // Only generated at connect() calls.
         NetEvent::Accepted(endpoint, _listener_id) => {
             // Only connection oriented protocols will generate this event
@@ -48,7 +52,7 @@ pub fn run(transport: Transport, addr: SocketAddr) {
                     let output_data = bincode::serialize(&message).unwrap();
                     let mut buffer = take_packet(output_data.len());
             buffer.append_slice(&output_data.as_slice());
-                    handler.network().send(endpoint, buffer);
+            handler2.network().send(endpoint, buffer);
                 }
             }
         }
@@ -62,4 +66,5 @@ pub fn run(transport: Transport, addr: SocketAddr) {
             );
         }
     });
+    task.wait();
 }
