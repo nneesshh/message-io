@@ -21,6 +21,7 @@ pub enum WakerCommand {
     Send(Endpoint, NetPacketGuard),
     SendTrunk, // for test only
     Close(ResourceId),
+    IsReady(ResourceId, Box<dyn FnOnce(Option<bool>) + Send>),
     Stop,
 }
 
@@ -33,6 +34,7 @@ impl std::fmt::Debug for WakerCommand {
             WakerCommand::Send(endpoint, _) => write!(f, "WakerCommand::Send({endpoint:?})"),
             WakerCommand::SendTrunk => write!(f, "WakerCommand::SendTrunk()"),
             WakerCommand::Close(id) => write!(f, "WakerCommand::Close({id:?}))"),
+            WakerCommand::IsReady(id, _) => write!(f, "WakerCommand::IsReady({id:?}))"),
             WakerCommand::Stop => write!(f, "WakerCommand::Stop()"),
         }
     }

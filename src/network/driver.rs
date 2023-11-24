@@ -3,13 +3,13 @@ use net_packet::{take_small_packet, NetPacketGuard};
 use super::adapter::{AcceptedType, Adapter, Local, PendingStatus, ReadStatus, Remote};
 use super::endpoint::Endpoint;
 use super::poll::Poll;
-use super::registry::{Register, SafeResourceRegistry};
+use super::registry::{LocklessResourceRegistry, Register};
 use super::remote_addr::RemoteAddr;
 use super::resource_id::{ResourceId, ResourceType};
 use super::transport::{TransportConnect, TransportListen};
 use super::SendStatus;
 
-use std::io::{self};
+use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -84,8 +84,9 @@ pub trait EventProcessor {
         config: TransportListen,
         addr: SocketAddr,
     ) -> io::Result<(ResourceId, SocketAddr)>;
-    fn process_send(&mut self, endpoint: Endpoint, buffer: NetPacketGuard) -> SendStatus;
+    fn process_send(&mut self, endpoint: Endpoint, data: &[u8]) -> SendStatus;
     fn process_close(&mut self, id: ResourceId) -> bool;
+    fn process_is_ready(&mut self, id: ResourceId) -> Option<bool>;
 }
 
 struct RemoteProperties {
@@ -99,10 +100,14 @@ impl RemoteProperties {
         Self { peer_addr, local, ready: AtomicBool::new(false) }
     }
 
+    ///
+    #[inline(always)]
     pub fn is_ready(&self) -> bool {
         self.ready.load(Ordering::Relaxed)
     }
 
+    ///
+    #[inline(always)]
     pub fn mark_as_ready(&self) {
         self.ready.store(true, Ordering::Relaxed);
     }
@@ -111,8 +116,8 @@ impl RemoteProperties {
 struct LocalProperties;
 
 pub struct Driver<R: Remote, L: Local> {
-    remote_registry: SafeResourceRegistry<R, RemoteProperties>,
-    local_registry: SafeResourceRegistry<L, LocalProperties>,
+    remote_registry: LocklessResourceRegistry<R, RemoteProperties>,
+    local_registry: LocklessResourceRegistry<L, LocalProperties>,
 }
 
 impl<R: Remote, L: Local> Driver<R, L> {
@@ -125,8 +130,12 @@ impl<R: Remote, L: Local> Driver<R, L> {
         let local_poll_registry = poll.create_registry(adapter_id, ResourceType::Local);
 
         Driver {
-            remote_registry: SafeResourceRegistry::<R, RemoteProperties>::new(remote_poll_registry),
-            local_registry: SafeResourceRegistry::<L, LocalProperties>::new(local_poll_registry),
+            remote_registry: LocklessResourceRegistry::<R, RemoteProperties>::new(
+                remote_poll_registry,
+            ),
+            local_registry: LocklessResourceRegistry::<L, LocalProperties>::new(
+                local_poll_registry,
+            ),
         }
     }
 }
@@ -141,12 +150,13 @@ impl<R: Remote, L: Local> Clone for Driver<R, L> {
 }
 
 impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
+    #[inline(always)]
     fn process_read(&mut self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
         match id.resource_type() {
             ResourceType::Remote => {
                 if let Some(ref mut remote) = self.remote_registry.get(id) {
                     let endpoint = Endpoint::new(id, remote.properties.peer_addr);
-                    log::trace!("Processed remote for {}", endpoint);
+                    //log::trace!("Processed remote for {}", endpoint);
 
                     //
                     if !remote.properties.is_ready() {
@@ -173,12 +183,14 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             }
         }
     }
+
+    #[inline(always)]
     fn process_write(&mut self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
         match id.resource_type() {
             ResourceType::Remote => {
                 if let Some(ref mut remote) = self.remote_registry.get(id) {
                     let endpoint = Endpoint::new(id, remote.properties.peer_addr);
-                    log::trace!("Processed remote for {}", endpoint);
+                    //log::trace!("Processed remote for {}", endpoint);
 
                     //
                     if !remote.properties.is_ready() {
@@ -200,6 +212,7 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             }
         }
     }
+
     fn process_connect(
         &mut self,
         config: TransportConnect,
@@ -213,11 +226,32 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             );
             (Endpoint::new(id, info.peer_addr), info.local_addr)
         });
-        ret.map(|(endpoint, addr)| {
-            log::trace!("Connect to {}", endpoint);
-            (endpoint, addr)
-        })
+        match ret {
+            Ok((endpoint, addr)) => {
+                // check if the resource id is ready
+                let id = endpoint.resource_id();
+                match self.process_is_ready(id) {
+                    Some(true) => {
+                        //
+                        return Ok((endpoint, addr));
+                    }
+                    Some(false) => {
+                        // `Connected` or `Accepted` not ready, need waiting
+                        return Ok((endpoint, addr));
+                    }
+                    None => {
+                        //
+                        return Err(io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            "Connection refused",
+                        ));
+                    }
+                };
+            }
+            Err(err) => Err(err),
+        }
     }
+
     fn process_listen(
         &mut self,
         config: TransportListen,
@@ -232,8 +266,9 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             (resource_id, addr)
         })
     }
-    fn process_send(&mut self, endpoint: Endpoint, buffer: NetPacketGuard) -> SendStatus {
-        let data = buffer.peek();
+
+    #[inline(always)]
+    fn process_send(&mut self, endpoint: Endpoint, data: &[u8]) -> SendStatus {
         match endpoint.resource_id().resource_type() {
             ResourceType::Remote => {
                 //
@@ -258,15 +293,26 @@ impl<R: Remote, L: Local<Remote = R>> EventProcessor for Driver<R, L> {
             }
         }
     }
+
+    #[inline(always)]
     fn process_close(&mut self, id: ResourceId) -> bool {
         match id.resource_type() {
             ResourceType::Remote => self.remote_registry.deregister(id),
             ResourceType::Local => self.local_registry.deregister(id),
         }
     }
+
+    #[inline(always)]
+    fn process_is_ready(&mut self, id: ResourceId) -> Option<bool> {
+        match id.resource_type() {
+            ResourceType::Remote => self.remote_registry.get(id).map(|r| r.properties.is_ready()),
+            ResourceType::Local => self.local_registry.get(id).map(|_| true),
+        }
+    }
 }
 
 impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
+    #[inline(always)]
     fn resolve_pending_remote(
         &self,
         remote: &mut Rc<Register<R, RemoteProperties>>,
@@ -294,6 +340,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         }
     }
 
+    #[inline(always)]
     fn write_to_remote(
         &self,
         remote: &mut Rc<Register<R, RemoteProperties>>,
@@ -305,6 +352,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         }
     }
 
+    #[inline(always)]
     fn read_from_remote(
         &self,
         remote: &mut Rc<Register<R, RemoteProperties>>,
@@ -322,6 +370,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
         }
     }
 
+    #[inline(always)]
     fn read_from_local(
         &self,
         local: &mut Rc<Register<L, LocalProperties>>,
@@ -351,6 +400,7 @@ impl<R: Remote, L: Local<Remote = R>> Driver<R, L> {
 }
 
 impl<R> std::fmt::Display for AcceptedType<'_, R> {
+    #[inline(always)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let string = match self {
             AcceptedType::Remote(addr, _) => format!("Remote({addr})"),

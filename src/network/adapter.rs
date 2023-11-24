@@ -78,6 +78,9 @@ pub enum SendStatus {
     /// The resource can not perform the required send operation.
     /// Usually this is due because it is performing the handshake.
     ResourceNotAvailable,
+
+    /// Abort actively
+    SendAbort,
 }
 
 /// Returned as a result of [`Remote::receive()`]

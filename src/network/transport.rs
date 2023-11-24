@@ -1,8 +1,6 @@
 #[cfg(feature = "tcp")]
 use crate::adapters::tcp::{TcpAdapter, TcpConnectConfig, TcpListenConfig};
-/*#[cfg(feature = "tcp")]
-use crate::adapters::framed_tcp::{FramedTcpAdapter, FramedTcpConnectConfig, FramedTcpListenConfig};
-#[cfg(feature = "udp")]
+/*#[cfg(feature = "udp")]
 use crate::adapters::udp::{self, UdpAdapter, UdpConnectConfig, UdpListenConfig};
 
  */
@@ -30,14 +28,6 @@ pub enum Transport {
     #[cfg(feature = "tcp")]
     Tcp,
     /*
-    /// Tcp framed protocol (available through the *tcp* feature).
-    /// Like TCP, but encoded with a slim frame layer to manage the data as a packet,
-    /// instead of as a stream.
-    /// It prefixes the message using variable integer encoding with the size of the message.
-    /// Most of the time you would want to use this instead of the raw `Tcp`.
-    #[cfg(feature = "tcp")]
-    FramedTcp,
-
     /// UDP protocol (available through the *udp* feature).
     /// Take into account that UDP is not connection oriented and a packet can be lost
     /// or received disordered.

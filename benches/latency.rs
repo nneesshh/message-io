@@ -1,78 +1,57 @@
-use message_io::network::{self, Transport, NetworkController, NetworkProcessor, Endpoint};
-use message_io::util::thread::{NamespacedThread};
-use message_io::util::encoding::{self, Decoder, MAX_ENCODED_SIZE};
+use message_io::network::{self, Endpoint, NetworkProcessor, Transport};
+use message_io::node;
+use message_io::util::thread::NamespacedThread;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
 #[cfg(feature = "websocket")]
-use tungstenite::{Message, connect as ws_connect, accept as ws_accept};
+use tungstenite::{accept as ws_accept, connect as ws_connect, Message};
 #[cfg(feature = "websocket")]
-use url::{Url};
+use url::Url;
 
-use std::net::{TcpListener, TcpStream, UdpSocket};
-use std::time::{Duration};
+use std::io::{Read, Write};
+#[cfg(feature = "udp")]
+use std::net::UdpSocket;
+use std::net::{TcpListener, TcpStream};
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    Arc,
 };
-use std::io::{Write, Read};
+use std::time::Duration;
 
 lazy_static::lazy_static! {
     static ref TIMEOUT: Duration = Duration::from_millis(1);
 }
 
-fn init_connection(transport: Transport) -> (NetworkController, NetworkProcessor, Endpoint) {
-    let (controller, mut processor) = network::split();
+fn init_connection(transport: Transport) -> (NetworkProcessor, Endpoint) {
+    let (engine, handler) = node::split();
 
+    let handler2 = handler.clone();
+    let (promise, pinky) = pinky_swear::PinkySwear::<Endpoint>::new();
     let running = Arc::new(AtomicBool::new(true));
-    let mut thread = {
+    let mut _thread = {
         let running = running.clone();
         NamespacedThread::spawn("perf-listening", move || {
-            while running.load(Ordering::Relaxed) {
-                processor.process_poll_event(Some(*TIMEOUT), |_| ());
-            }
-            processor
+            let receiver_addr = handler2.network().listen_sync(transport, "127.0.0.1:0").unwrap().1;
+            let receiver = handler2.network().connect_sync(transport, receiver_addr).unwrap().0;
+            pinky.swear(receiver);
+
+            //
+            running.store(false, Ordering::Relaxed);
         })
     };
 
-    let receiver_addr = controller.listen(transport, "127.0.0.1:0").unwrap().1;
-    let receiver = controller.connect_sync(transport, receiver_addr).unwrap().0;
+    //
+    let mut processor = network::create_processor(engine);
 
-    running.store(false, Ordering::Relaxed);
-    let processor = thread.join();
+    //
+    while running.load(Ordering::Relaxed) {
+        processor.process_poll_event(Some(*TIMEOUT), &mut |_| ());
+    }
+
     // From here, the connection is performed independently of the transport used
-
-    (controller, processor, receiver)
-}
-
-fn latency_by(c: &mut Criterion, transport: Transport) {
-    let msg = format!("latency by {}", transport);
-    c.bench_function(&msg, |b| {
-        let (controller, mut processor, endpoint) = init_connection(transport);
-
-        b.iter(|| {
-            controller.send(endpoint, &[0xFF]);
-            processor.process_poll_event(Some(*TIMEOUT), |_| ());
-        });
-    });
-}
-
-fn latency_by_native_udp(c: &mut Criterion) {
-    let msg = format!("latency by native Udp");
-    c.bench_function(&msg, |b| {
-        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let addr = receiver.local_addr().unwrap();
-
-        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
-        sender.connect(addr).unwrap();
-
-        let mut buffer: [u8; 1] = [0; 1];
-
-        b.iter(|| {
-            sender.send(&[0xFF]).unwrap();
-            receiver.recv(&mut buffer).unwrap();
-        });
-    });
+    let receiver = promise.wait();
+    (processor, receiver)
 }
 
 fn latency_by_native_tcp(c: &mut Criterion) {
@@ -93,29 +72,35 @@ fn latency_by_native_tcp(c: &mut Criterion) {
     });
 }
 
-fn latency_by_native_framed_tcp(c: &mut Criterion) {
-    let msg = format!("latency by native FramedTcp");
-    c.bench_function(&msg, |b| {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
+fn latency_by(c: &mut Criterion, transport: Transport) {
+    let msg = format!("latency by {}", transport);
+    let (mut processor, endpoint) = init_connection(transport);
 
-        let mut sender = TcpStream::connect(addr).unwrap();
-        let (mut receiver, _) = listener.accept().unwrap();
+    c.bench_function(&msg, |b| {
+        b.iter(|| {
+            let resource_id = endpoint.resource_id();
+            let ep = processor.event_processor(resource_id.adapter_id());
+            ep.process_send(endpoint, &[0xFF]);
+            processor.process_poll_event(Some(*TIMEOUT), &mut |_| ());
+        });
+    });
+}
+
+#[cfg(feature = "udp")]
+fn latency_by_native_udp(c: &mut Criterion) {
+    let msg = format!("latency by native Udp");
+    c.bench_function(&msg, |b| {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let addr = receiver.local_addr().unwrap();
+
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        sender.connect(addr).unwrap();
 
         let mut buffer: [u8; 1] = [0; 1];
-        let mut framming = [0; MAX_ENCODED_SIZE]; // used to avoid a heap allocation
-        let mut decoder = Decoder::default();
 
         b.iter(|| {
-            let encoded_size = encoding::encode_size(&[0xFF], &mut framming);
-            sender.write(&encoded_size).unwrap();
-            sender.write(&[0xFF]).unwrap();
-
-            let mut message_received = false;
-            while !message_received {
-                let bytes = receiver.read(&mut buffer).unwrap();
-                decoder.decode(&buffer[0..bytes], |_decoded_data| message_received = true);
-            }
+            sender.send(&[0xFF]).unwrap();
+            receiver.recv(&mut buffer).unwrap();
         });
     });
 }
@@ -146,11 +131,19 @@ fn latency_by_native_web_socket(c: &mut Criterion) {
 }
 
 fn latency(c: &mut Criterion) {
-    #[cfg(feature = "tcp")]
-    latency_by(c, Transport::Tcp);
-
+    #[cfg(feature = "udp")]
+    latency_by_native_udp(c);
     #[cfg(feature = "tcp")]
     latency_by_native_tcp(c);
+    #[cfg(feature = "websocket")]
+    latency_by_native_web_socket(c);
+
+    #[cfg(feature = "udp")]
+    latency_by(c, Transport::Udp);
+    #[cfg(feature = "tcp")]
+    latency_by(c, Transport::Tcp);
+    #[cfg(feature = "websocket")]
+    latency_by(c, Transport::Ws);
 }
 
 criterion_group!(benches, latency);

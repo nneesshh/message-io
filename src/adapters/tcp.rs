@@ -40,18 +40,21 @@ pub struct TcpConnectConfig {
 impl TcpConnectConfig {
     /// Bind the TCP connection to a specific interface, identified by its name. This option works
     /// in Unix, on other systems, it will be ignored.
+    #[inline(always)]
     pub fn with_bind_device(mut self, device: String) -> Self {
         self.bind_device = Some(device);
         self
     }
 
     /// Enables TCP keepalive settings on the socket.
+    #[inline(always)]
     pub fn with_keepalive(mut self, keepalive: TcpKeepalive) -> Self {
         self.keepalive = Some(keepalive);
         self
     }
 
     /// Specify the source address and port.
+    #[inline(always)]
     pub fn with_source_address(mut self, source_address: SocketAddr) -> Self {
         self.source_address = Some(source_address);
         self
@@ -67,12 +70,14 @@ pub struct TcpListenConfig {
 impl TcpListenConfig {
     /// Bind the TCP listener to a specific interface, identified by its name. This option works in
     /// Unix, on other systems, it will be ignored.
+    #[inline(always)]
     pub fn with_bind_device(mut self, device: String) -> Self {
         self.bind_device = Some(device);
         self
     }
 
     /// Enables TCP keepalive settings on client connection sockets.
+    #[inline(always)]
     pub fn with_keepalive(mut self, keepalive: TcpKeepalive) -> Self {
         self.keepalive = Some(keepalive);
         self
@@ -91,6 +96,7 @@ pub(crate) struct RemoteResource {
 }
 
 impl Resource for RemoteResource {
+    #[inline(always)]
     fn source(&mut self) -> &mut dyn Source {
         &mut self.stream
     }
@@ -158,6 +164,7 @@ impl Remote for RemoteResource {
         })
     }
 
+    #[inline(always)]
     fn receive(&self, mut process_data: impl FnMut(NetPacketGuard)) -> ReadStatus {
         loop {
             let mut input_buffer = take_small_packet();
@@ -186,19 +193,20 @@ impl Remote for RemoteResource {
         }
     }
 
+    #[inline(always)]
     fn send(&self, data: &[u8]) -> SendStatus {
         // TODO: The current implementation implies an active waiting,
         // improve it using POLLIN instead to avoid active waiting.
         // Note: Despite the fear that an active waiting could generate,
         // this only occurs in the case when the receiver is full because reads slower than it sends.
         let mut total_bytes_sent = 0;
-        loop {
+        for _ in 0..1000 {
             let stream = &self.stream;
             match stream.deref().write(&data[total_bytes_sent..]) {
                 Ok(bytes_sent) => {
                     total_bytes_sent += bytes_sent;
                     if total_bytes_sent == data.len() {
-                        break SendStatus::Sent;
+                        return SendStatus::Sent;
                     }
                 }
                 Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => continue,
@@ -207,12 +215,16 @@ impl Remote for RemoteResource {
                 // a Event::Disconnection will be generated later.
                 Err(err) => {
                     log::error!("TCP receive error: {}", err);
-                    break SendStatus::ResourceNotFound; // should not happen
+                    return SendStatus::ResourceNotFound; // should not happen
                 }
             }
         }
+
+        // abort after retry 1000 times
+        return SendStatus::SendAbort;
     }
 
+    #[inline(always)]
     fn pending(&self) -> PendingStatus {
         let status = check_tcp_stream_ready(&self.stream);
 
@@ -235,6 +247,7 @@ impl Remote for RemoteResource {
 }
 
 /// Check if a TcpStream can be considered connected.
+#[inline(always)]
 pub fn check_tcp_stream_ready(stream: &TcpStream) -> PendingStatus {
     // A multiplatform non-blocking way to determine if the TCP stream is connected:
     // Extracted from: https://github.com/tokio-rs/mio/issues/1486
@@ -250,6 +263,7 @@ pub fn check_tcp_stream_ready(stream: &TcpStream) -> PendingStatus {
 }
 
 /// Get socket from tcp stream
+#[inline(always)]
 pub fn tcp_stream_to_socket(stream: &TcpStream) -> Socket {
     #[cfg(target_os = "windows")]
     unsafe {
@@ -267,6 +281,7 @@ pub(crate) struct LocalResource {
 }
 
 impl Resource for LocalResource {
+    #[inline(always)]
     fn source(&mut self) -> &mut dyn Source {
         &mut self.listener
     }
@@ -324,6 +339,7 @@ impl Local for LocalResource {
         })
     }
 
+    #[inline(always)]
     fn accept(&self, mut accept_remote: impl FnMut(AcceptedType<'_, Self::Remote>)) {
         loop {
             match self.listener.accept() {

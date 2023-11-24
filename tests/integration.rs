@@ -84,7 +84,7 @@ fn start_echo_server(
 
          let handler2 = handler.clone();
         let mut listener_id_opt = None;
-        let _node_task =node::node_listener_for_each_async(engine, &handler, move |event| match event {
+        let mut task =node::node_listener_for_each_async(engine, &handler, move |event| match event {
             NodeEvent::Waker(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
             NodeEvent::Network(net_event) => match net_event {
                 NetEvent::Connected(..) => unreachable!(),
@@ -129,6 +129,7 @@ fn start_echo_server(
                 }
             },
         });
+        task.wait();
     });
 
     let server_addr = rx.recv_timeout(*TIMEOUT).expect(TIMEOUT_EVENT_RECV_ERR);
@@ -151,7 +152,7 @@ fn start_echo_client_manager(
         }
 
         let handler2 = handler.clone();
-        let _node_task =node::node_listener_for_each_async(engine, &handler, Box::new(move |event| match event {
+        let mut task =node::node_listener_for_each_async(engine, &handler, Box::new(move |event| match event {
             NodeEvent::Waker(_) => panic!("{}", TIMEOUT_EVENT_RECV_ERR),
             NodeEvent::Network(net_event) => match net_event {
                 NetEvent::Connected(server, status) => {
@@ -175,6 +176,7 @@ fn start_echo_client_manager(
                 NetEvent::Disconnected(_) => unreachable!(),
             },
         }));
+        task.wait();
     })
 }
 

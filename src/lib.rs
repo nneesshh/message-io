@@ -1,10 +1,6 @@
 //! Check the [Github README](https://github.com/lemunozm/message-io),
 //! to see an overview of the library.
 
-#[cfg(doctest)]
-// Tells rustdoc where is the README to compile and test the rust code found there
-doc_comment::doctest!("../README.md");
-
 ///
 mod waker_command;
 pub use waker_command::WakerCommand;

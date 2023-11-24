@@ -138,11 +138,15 @@ impl Clone for NodeHandler {
 ///
 /// let (engine, handler) = node::split();
 ///
-/// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
+/// let handler2 = handler.clone();
+/// let _ = std::thread::spawn(move || {
+///     let (id, addr) = handler2.network().listen_sync(Transport::Tcp, "127.0.0.1:0").unwrap();
+/// });
 ///
-/// let task = node::node_listener_for_each_async(engine, handler, move |event| match event {
+/// let handler3 =handler.clone();
+/// let task = node::node_listener_for_each_async(engine, &handler, move |event| match event {
 ///      NodeEvent::Network(net_event) => { /* Your logic here */ },
-///      NodeEvent::Waker(_) => handler.stop(),
+///      NodeEvent::Waker(_) => handler3.stop(),
 /// });
 /// // for_each_async() will act asynchronous during 'task' lifetime.
 ///
@@ -169,7 +173,7 @@ where
         //
         NamespacedThread::spawn("node-network-thread", move || {
             //
-            let mut network_processor = network::create_processor(engine);
+            let mut processor = network::create_processor(engine);
 
             //
             let handler2 = handler.clone();
@@ -179,7 +183,7 @@ where
                 }
             };
             while handler.is_running() {
-                network_processor.process_poll_event(Some(*SAMPLING_TIMEOUT), cb);
+                processor.process_poll_event(Some(*SAMPLING_TIMEOUT), cb);
             }
         })
     };

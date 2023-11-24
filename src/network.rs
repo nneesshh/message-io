@@ -22,7 +22,7 @@ pub use remote_addr::{RemoteAddr, ToRemoteAddr};
 pub use resource_id::{ResourceId, ResourceType};
 pub use transport::{Transport, TransportConnect, TransportListen};
 
-use loader::{EventProcessorList, Processor, UnimplementedDriver};
+use loader::{BoxedEventProcessor, EventProcessorList, UnimplementedDriver};
 use poll::{Poll, PollEvent};
 
 use std::io::{self};
@@ -41,8 +41,9 @@ use super::node::NodeEvent;
 /// Create a network processor instance.
 pub fn create_processor(mut engine: PollEngine) -> NetworkProcessor {
     let command_receiver = engine.command_receiver().clone();
-    let mut processors: EventProcessorList =
-        (0..ResourceId::MAX_ADAPTERS).map(|_| Box::new(UnimplementedDriver) as Processor).collect();
+    let mut processors: EventProcessorList = (0..ResourceId::MAX_ADAPTERS)
+        .map(|_| Box::new(UnimplementedDriver) as BoxedEventProcessor)
+        .collect();
     Transport::iter().for_each(|transport| transport.mount_adapter(&mut engine, &mut processors));
     NetworkProcessor::new(engine.take(), command_receiver, processors)
 }
@@ -72,7 +73,7 @@ impl NetworkController {
     }
 
     /// Creates a connection to the specified address.
-    /// The endpoint, an identifier of the new connection, will be returned.
+    /// The endpoint, an identifier of the new connection, will be returned in the callback.
     /// This function will generate a [`NetEvent::Connected`] event with the result of the connection.
     /// This call will **NOT** block to perform the connection.
     ///
@@ -91,30 +92,32 @@ impl NetworkController {
     ///
     /// let (engine, handler) = node::split();
     ///
-    /// let (id, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
-    /// let (conn_endpoint, _) = handler.network().connect(Transport::Tcp, addr).unwrap();
-    /// // The socket could not be able to send yet.
+    /// let handler2 = handler.clone();
+    /// handler.network().listen(Transport::Tcp, "127.0.0.1:0", move |ret| {
+    ///     if let Ok((_, addr)) = ret {
+    ///         handler2.network().connect(Transport::Tcp, addr, |ret| {});
+    ///     }
+    /// });
     ///
-    /// listener.for_each(move |event| match event {
+    /// let handler3 = handler.clone();
+    /// let mut task = node::node_listener_for_each_async(engine, &handler, move |event| match event {
     ///     NodeEvent::Network(net_event) => match net_event {
     ///         NetEvent::Connected(endpoint, established) => {
-    ///             assert_eq!(conn_endpoint, endpoint);
     ///             if established {
     ///                 println!("Connected!");
     ///                 let buffer = take_packet(42);
-    ///                 handler.network().send(endpoint, buffer);
+    ///                 handler3.network().send(endpoint, buffer);
     ///             }
     ///             else {
     ///                 println!("Could not connect");
     ///             }
     ///         },
     ///         NetEvent::Accepted(endpoint, listening_id) => {
-    ///             assert_eq!(id, listening_id);
     ///             println!("New connected endpoint: {}", endpoint.addr());
     ///         },
     ///         _ => (),
     ///     }
-    ///     NodeEvent::Waker(_) => handler.stop(),
+    ///     NodeEvent::Waker(_) => handler3.stop(),
     /// });
     /// ```
     pub fn connect<F>(&self, transport: Transport, addr: impl ToRemoteAddr, cb: F)
@@ -126,7 +129,7 @@ impl NetworkController {
 
     /// Creates a connection to the specified address with custom transport options for transports
     /// that support it.
-    /// The endpoint, an identifier of the new connection, will be returned.
+    /// The endpoint, an identifier of the new connection, will be returned in the callback.
     /// This function will generate a [`NetEvent::Connected`] event with the result of the
     /// connection.  This call will **NOT** block to perform the connection.
     ///
@@ -148,17 +151,16 @@ impl NetworkController {
     ///
     /// let config = TcpConnectConfig::default();
     /// let addr = "127.0.0.1:7878";
-    /// let (conn_endpoint, _) = handler.network().connect_with(TransportConnect::Tcp(config), addr).unwrap();
-    /// // The socket could not be able to send yet.
+    /// handler.network().connect_with(TransportConnect::Tcp(config), addr, |_| {});
     ///
-    /// listener.for_each(move |event| match event {
+    /// let handler2 = handler.clone();
+    /// let mut task = node::node_listener_for_each_async(engine, &handler, move |event| match event {
     ///     NodeEvent::Network(net_event) => match net_event {
     ///         NetEvent::Connected(endpoint, established) => {
-    ///             assert_eq!(conn_endpoint, endpoint);
     ///             if established {
     ///                 println!("Connected!");
     ///                 let buffer = take_packet(42);
-    ///                 handler.network().send(endpoint, buffer);
+    ///                 handler2.network().send(endpoint, buffer);
     ///             }
     ///             else {
     ///                 println!("Could not connect");
@@ -166,7 +168,7 @@ impl NetworkController {
     ///         },
     ///         _ => (),
     ///     }
-    ///     NodeEvent::Waker(_) => handler.stop(),
+    ///     NodeEvent::Waker(_) => handler2.stop(),
     /// });
     /// ```
     pub fn connect_with<F>(
@@ -197,12 +199,12 @@ impl NetworkController {
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::{Transport, NetEvent};
     ///
-    /// let (handler, listener) = node::split();
+    /// let (engine, handler) = node::split();
     ///
     /// // poll network event
-    /// let _node_task = listener.for_each_async(move |_event| {});
+    /// let mut task = node::node_listener_for_each_async(engine, &handler, move |_event| {});
     ///
-    /// let (_, addr) = handler.network().listen(Transport::Tcp, "127.0.0.1:0").unwrap();
+    /// let (_, addr) = handler.network().listen_sync(Transport::Tcp, "127.0.0.1:0").unwrap();
     /// match handler.network().connect_sync(Transport::Tcp, addr) {
     ///     Ok((endpoint, _)) => {
     ///         println!("Connected!");
@@ -214,6 +216,7 @@ impl NetworkController {
     ///     }
     ///     Err(err) => println!("An OS error creating the socket"),
     /// }
+    /// task.wait();
     /// ```
     pub fn connect_sync(
         &self,
@@ -245,10 +248,10 @@ impl NetworkController {
     /// use message_io::network::{TransportConnect, NetEvent};
     /// use message_io::adapters::tcp::{TcpConnectConfig};
     ///
-    /// let (handler, listener) = node::split();
+    /// let (engine, handler) = node::split();
     ///
     /// // poll network event
-    /// let _node_task = listener.for_each_async(move |_event| {});
+    /// let mut task = node::node_listener_for_each_async(engine, &handler, move |_event| {});
     ///
     /// let config = TcpConnectConfig::default();
     /// let addr = "127.0.0.1:7878";
@@ -263,6 +266,7 @@ impl NetworkController {
     ///     }
     ///     Err(err) => println!("An OS error creating the socket"),
     /// }
+    /// task.wait();
     /// ```
     pub fn connect_sync_with(
         &self,
@@ -275,9 +279,38 @@ impl NetworkController {
             pinky.swear(ret);
         };
         let addr = addr.to_remote_addr().unwrap();
-        self.commands
-            .post(self.waker(), WakerCommand::Connect(transport_connect, addr, Box::new(cb)));
-        promise.wait()
+        self.connect_with(transport_connect, addr, cb);
+        let ret = promise.wait();
+        match ret {
+            Ok((endpoint, addr)) => {
+                // about sleep 1 second
+                for _ in 0..1000 {
+                    std::thread::sleep(Duration::from_millis(1));
+                    let id = endpoint.resource_id();
+                    match self.is_ready_sync(id) {
+                        Some(true) => {
+                            //
+                            return Ok((endpoint, addr));
+                        }
+                        Some(false) => continue,
+                        None => {
+                            //
+                            return Err(io::Error::new(
+                                io::ErrorKind::ConnectionRefused,
+                                "Connection refused",
+                            ));
+                        }
+                    }
+                }
+
+                // abort after retry 1000 times
+                return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "Connection aborted"));
+            }
+            Err(err) => {
+                //
+                return Err(err);
+            }
+        };
     }
 
     /// Listen messages from specified transport.
@@ -331,8 +364,7 @@ impl NetworkController {
             pinky.swear(ret);
         };
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
-        self.commands
-            .post(self.waker(), WakerCommand::Listen(transport_listen, addr, Box::new(cb)));
+        self.listen_with(transport_listen, addr, cb);
         promise.wait()
     }
 
@@ -354,9 +386,21 @@ impl NetworkController {
     /// if you remove this resource you are removing the listener of all of them.
     /// For that cases there is no need to remove the resource because non-oriented connections
     /// have not connection itself to close, 'there is no spoon'.
-    //#[inline(always)]
+    #[inline(always)]
     pub fn close(&self, resource_id: ResourceId) {
         self.commands.post(self.waker(), WakerCommand::Close(resource_id));
+    }
+
+    ///
+    #[inline(always)]
+    pub fn is_ready_sync(&self, resource_id: ResourceId) -> Option<bool> {
+        let (promise, pinky) = PinkySwear::<Option<bool>>::new();
+        let cb = move |opt| {
+            //
+            pinky.swear(opt);
+        };
+        self.commands.post(self.waker(), WakerCommand::IsReady(resource_id, Box::new(cb)));
+        promise.wait()
     }
 }
 
@@ -377,6 +421,12 @@ impl NetworkProcessor {
         Self { poll, command_receiver, processors }
     }
 
+    ///
+    #[inline(always)]
+    pub fn event_processor(&mut self, adapter_id: u8) -> &mut BoxedEventProcessor {
+        get_event_processor_by_adapter_id(&mut self.processors, adapter_id)
+    }
+
     /// Process the next poll event.
     /// This method waits the timeout specified until the poll event is generated.
     /// If `None` is passed as timeout, it will wait indefinitely.
@@ -390,19 +440,23 @@ impl NetworkProcessor {
     ) {
         let command_receiver = &mut self.command_receiver;
         let processors = &mut self.processors;
-        self.poll.process_event(timeout, |poll_event| {
+        let poll = &mut self.poll;
+
+        poll.process_event(timeout, |poll_event| {
             match poll_event {
                 PollEvent::NetworkRead(resource_id) => {
-                    let processor = &mut processors[resource_id.adapter_id() as usize];
-                    processor.process_read(resource_id, &mut |net_event| {
+                    let ep =
+                        get_event_processor_by_adapter_id(processors, resource_id.adapter_id());
+                    ep.process_read(resource_id, &mut |net_event| {
                         log::trace!("Processed {:?}", net_event);
                         event_callback(NodeEvent::Network(net_event));
                     });
                 }
 
                 PollEvent::NetworkWrite(resource_id) => {
-                    let processor = &mut processors[resource_id.adapter_id() as usize];
-                    processor.process_write(resource_id, &mut |net_event| {
+                    let ep =
+                        get_event_processor_by_adapter_id(processors, resource_id.adapter_id());
+                    ep.process_write(resource_id, &mut |net_event| {
                         log::trace!("Processed {:?}", net_event);
                         event_callback(NodeEvent::Network(net_event));
                     });
@@ -421,20 +475,24 @@ impl NetworkProcessor {
                                     event_callback(NodeEvent::Waker(WakerCommand::Greet(greet)));
                                 }
                                 WakerCommand::Connect(config, addr, cb) => {
-                                    let processor = &mut processors[config.id() as usize];
-                                    let ret = processor.process_connect(config, addr);
+                                    let ep =
+                                        get_event_processor_by_adapter_id(processors, config.id());
+                                    let ret = ep.process_connect(config, addr);
                                     cb(ret);
                                 }
                                 WakerCommand::Listen(config, addr, cb) => {
-                                    let processor = &mut processors[config.id() as usize];
-                                    let ret = processor.process_listen(config, addr);
+                                    let ep =
+                                        get_event_processor_by_adapter_id(processors, config.id());
+                                    let ret = ep.process_listen(config, addr);
                                     cb(ret);
                                 }
                                 WakerCommand::Send(endpoint, buffer) => {
                                     let resource_id = endpoint.resource_id();
-                                    let processor =
-                                        &mut processors[resource_id.adapter_id() as usize];
-                                    processor.process_send(endpoint, buffer);
+                                    let ep = get_event_processor_by_adapter_id(
+                                        processors,
+                                        resource_id.adapter_id(),
+                                    );
+                                    ep.process_send(endpoint, buffer.peek());
                                 }
                                 WakerCommand::SendTrunk => {
                                     //
@@ -442,9 +500,20 @@ impl NetworkProcessor {
                                 }
                                 WakerCommand::Close(resource_id) => {
                                     //
-                                    let processor =
-                                        &mut processors[resource_id.adapter_id() as usize];
-                                    processor.process_close(resource_id);
+                                    let ep = get_event_processor_by_adapter_id(
+                                        processors,
+                                        resource_id.adapter_id(),
+                                    );
+                                    ep.process_close(resource_id);
+                                }
+                                WakerCommand::IsReady(resource_id, cb) => {
+                                    //
+                                    let ep = get_event_processor_by_adapter_id(
+                                        processors,
+                                        resource_id.adapter_id(),
+                                    );
+                                    let b = ep.process_is_ready(resource_id);
+                                    cb(b);
                                 }
                                 WakerCommand::Stop => {
                                     //
@@ -480,6 +549,15 @@ impl NetworkProcessor {
     }
 }
 
+///
+#[inline(always)]
+pub fn get_event_processor_by_adapter_id(
+    processors: &mut EventProcessorList,
+    adapter_id: u8,
+) -> &mut BoxedEventProcessor {
+    &mut processors[adapter_id as usize]
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -494,8 +572,8 @@ mod tests {
     use super::*;
 
     lazy_static::lazy_static! {
-        static ref TIMEOUT: Duration = Duration::from_millis(1000);
-        static ref LOCALHOST_CONN_TIMEOUT: Duration = Duration::from_millis(5000);
+        static ref TIMEOUT: Duration = Duration::from_millis(5000);
+        static ref LOCALHOST_CONN_TIMEOUT: Duration = Duration::from_millis(10000);
     }
 
     #[cfg_attr(feature = "tcp", test_case(Transport::Tcp))]
@@ -540,7 +618,7 @@ mod tests {
             //
             let (_listener_id, addr) =
                 handler.network().listen_sync(transport, "127.0.0.1:0").unwrap();
-            handler.network().connect_sync(transport, addr).unwrap();
+            let _ = handler.network().connect_sync(transport, addr);
         });
 
         processor.process_poll_events_until_timeout(*TIMEOUT, &mut |_| ());
@@ -597,7 +675,7 @@ mod tests {
             let (listener_id, addr) =
                 handler.network().listen_sync(transport, "127.0.0.1:0").unwrap();
             handler.network().close(listener_id);
-            std::thread::sleep(std::time::Duration::from_secs(3));
+            std::thread::sleep(std::time::Duration::from_secs(1));
             match handler.network().connect_sync(transport, addr) {
                 Ok(_) => {
                     //

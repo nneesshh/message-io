@@ -1,5 +1,3 @@
-use net_packet::NetPacketGuard;
-
 use crate::events::{self, EventReceiver, EventSender};
 use crate::WakerCommand;
 
@@ -16,10 +14,10 @@ use std::io::{self};
 use std::net::SocketAddr;
 
 ///
-pub type Processor = Box<dyn EventProcessor>;
+pub type BoxedEventProcessor = Box<dyn EventProcessor>;
 
 ///
-pub type EventProcessorList = Vec<Processor>;
+pub type EventProcessorList = Vec<BoxedEventProcessor>;
 
 /// Used to configured the engine
 pub struct PollEngine {
@@ -65,7 +63,7 @@ impl PollEngine {
         let index = adapter_id as usize;
 
         let driver = Driver::new(adapter, adapter_id, poll);
-        processors[index] = Box::new(driver) as Processor;
+        processors[index] = Box::new(driver) as BoxedEventProcessor;
     }
 
     /// Consume this instance to obtain the poll handles.
@@ -105,10 +103,13 @@ impl EventProcessor for UnimplementedDriver {
     ) -> io::Result<(ResourceId, SocketAddr)> {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
-    fn process_send(&mut self, _: Endpoint, _: NetPacketGuard) -> SendStatus {
+    fn process_send(&mut self, _: Endpoint, _: &[u8]) -> SendStatus {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
     fn process_close(&mut self, _: ResourceId) -> bool {
+        panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
+    }
+    fn process_is_ready(&mut self, _: ResourceId) -> Option<bool> {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
 }

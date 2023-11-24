@@ -28,12 +28,12 @@ impl<S: Resource, P> Drop for Register<S, P> {
     }
 }
 
-/// SafeResourceRegistry
-pub struct SafeResourceRegistry<S: Resource, P> {
+/// LocklessResourceRegistry
+pub struct LocklessResourceRegistry<S: Resource, P> {
     pub inner: Rc<UnsafeCell<ResourceRegistry<S, P>>>,
 }
 
-impl<S: Resource, P> SafeResourceRegistry<S, P> {
+impl<S: Resource, P> LocklessResourceRegistry<S, P> {
     ///
     pub fn new(poll_registry: PollRegistry) -> Self {
         Self { inner: Rc::new(UnsafeCell::new(ResourceRegistry::<S, P>::new(poll_registry))) }
@@ -64,7 +64,7 @@ impl<S: Resource, P> SafeResourceRegistry<S, P> {
     }
 }
 
-impl<S: Resource, P> Clone for SafeResourceRegistry<S, P> {
+impl<S: Resource, P> Clone for LocklessResourceRegistry<S, P> {
     #[inline(always)]
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone() }
@@ -88,7 +88,6 @@ impl<S: Resource, P> ResourceRegistry<S, P> {
 
     #[inline(always)]
     fn register(&mut self, mut resource: S, properties: P, write_readiness: bool) -> ResourceId {
-        // The registry must be locked for the entire implementation to avoid the poll
         // to generate events over not yet registered resources.
         let id = self.poll_registry.add(resource.source(), write_readiness);
         let register = Register::new(resource, properties, self.poll_registry.clone());
