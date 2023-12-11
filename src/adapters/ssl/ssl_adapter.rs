@@ -74,12 +74,12 @@ pub mod encryption {
             socket.set_nonblocking(true)?;
             socket.set_nodelay(true)?;
 
-            if let Some(source_address) = config.source_address {
+            if let Some(source_address) = config.source_address_opt {
                 socket.bind(&source_address.into())?;
             }
 
             #[cfg(unix)]
-            if let Some(bind_device) = config.bind_device {
+            if let Some(bind_device) = config.bind_device_opt {
                 let device = CString::new(bind_device)?;
 
                 #[cfg(not(target_os = "macos"))]
@@ -122,7 +122,7 @@ pub mod encryption {
                         remote: Self {
                             //
                             stream: Mutex::new(s),
-                            keepalive: config.keepalive,
+                            keepalive: config.keepalive_opt,
                         },
                         local_addr,
                         peer_addr,
@@ -171,7 +171,7 @@ pub mod encryption {
             let stream = self.stream.lock();
             let status = check_stream_ready(&stream);
             if status == PendingStatus::Ready {
-                if let Some(keepalive) = &self.keepalive {
+                if let Some(keepalive) = &self.keepalive_opt {
                     //
                     let socket = stream_to_socket(&stream);
 
@@ -262,7 +262,7 @@ pub mod encryption {
             socket.set_reuse_address(true)?;
 
             #[cfg(unix)]
-            if let Some(bind_device) = config.bind_device {
+            if let Some(bind_device) = config.bind_device_opt {
                 let device = CString::new(bind_device)?;
 
                 #[cfg(not(target_os = "macos"))]
@@ -287,7 +287,7 @@ pub mod encryption {
 
             let local_addr = listener.local_addr().unwrap();
             Ok(ListeningInfo {
-                local: { LocalResource { listener, keepalive: config.keepalive } },
+                local: { LocalResource { listener, keepalive: config.keepalive_opt } },
                 local_addr,
             })
         }
@@ -305,7 +305,7 @@ pub mod encryption {
                             RemoteResource {
                                 //
                                 stream: Mutex::new(SslStream::NativeTlsStreamAcceptor(s, acceptor)),
-                                keepalive: self.keepalive.clone(),
+                                keepalive: self.keepalive_opt.clone(),
                             },
                         ))
                     }
@@ -613,7 +613,7 @@ pub mod encryption {
             socket.set_reuse_address(true)?;
 
             #[cfg(unix)]
-            if let Some(bind_device) = config.bind_device {
+            if let Some(bind_device) = config.bind_device_opt {
                 let device = CString::new(bind_device)?;
 
                 #[cfg(not(target_os = "macos"))]
