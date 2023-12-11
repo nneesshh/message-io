@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::ffi::{CString};
 use std::io;
 use std::net::SocketAddr;
 
