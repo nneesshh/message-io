@@ -29,7 +29,7 @@ pub(crate) fn tcp_remote_connect_with(
     }
 
     #[cfg(unix)]
-    if let Some(bind_device) = config.bind_device {
+    if let Some(bind_device) = config.bind_device_opt {
         let device = CString::new(bind_device)?;
 
         #[cfg(not(target_os = "macos"))]

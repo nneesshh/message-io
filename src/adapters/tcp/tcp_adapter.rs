@@ -183,7 +183,7 @@ impl Local for LocalResource {
         socket.set_reuse_address(true)?;
 
         #[cfg(unix)]
-        if let Some(bind_device) = config.bind_device {
+        if let Some(bind_device) = config.bind_device_opt {
             let device = CString::new(bind_device)?;
 
             #[cfg(not(target_os = "macos"))]
