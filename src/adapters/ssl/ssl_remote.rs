@@ -1,5 +1,5 @@
 #[cfg(unix)]
-use std::ffi::{CString};
+use std::ffi::CString;
 use std::io;
 use std::net::SocketAddr;
 
@@ -12,7 +12,7 @@ use crate::network::driver::ConnectConfig;
 
 ///
 pub(crate) fn ssl_remote_connect_with(
-    config: &ConnectConfig,
+    config: ConnectConfig,
     peer_addr: SocketAddr,
     uri: Uri,
 ) -> io::Result<ConnectionInfo> {

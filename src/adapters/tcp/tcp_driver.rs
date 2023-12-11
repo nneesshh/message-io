@@ -222,7 +222,7 @@ impl EventProcessor for TcpDriver {
         let peer_addr = *raddr.socket_addr();
 
         //
-        let connection_info_ret = tcp_remote_connect_with(&config, peer_addr);
+        let connection_info_ret = tcp_remote_connect_with(config, peer_addr);
         let _ = connection_info_ret.map(|info| {
             // register TcpStream
             self.node_handler.post(

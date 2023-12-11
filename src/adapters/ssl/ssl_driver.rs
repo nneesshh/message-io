@@ -250,7 +250,7 @@ impl EventProcessor for SslDriver {
         let peer_addr = *raddr.socket_addr();
 
         //
-        let connection_info_ret = ssl_remote_connect_with(&config, peer_addr, uri);
+        let connection_info_ret = ssl_remote_connect_with(config, peer_addr, uri);
         let _ = connection_info_ret.map(|info| {
             // register TcpStream
             self.node_handler.post(
