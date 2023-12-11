@@ -2,7 +2,7 @@ use crate::network::adapter::{
     Resource, Remote, Local, Adapter, SendStatus, AcceptedType, ReadStatus, ConnectionInfo,
     ListeningInfo, PendingStatus,
 };
-use crate::network::{RemoteAddr, Readiness, TransportConnect, TransportListen};
+use crate::network::{RemoteAddr, Readiness, ConnectConfig, ListenConfig};
 
 use mio::net::{UdpSocket};
 use mio::event::{Source};
@@ -148,13 +148,9 @@ impl Resource for RemoteResource {
 
 impl Remote for RemoteResource {
     fn connect_with(
-        config: TransportConnect,
+        config: ConnectCofig,
         remote_addr: RemoteAddr,
     ) -> io::Result<ConnectionInfo<Self>> {
-        let config = match config {
-            TransportConnect::Udp(config) => config,
-            _ => panic!("Internal error: Got wrong config"),
-        };
 
         let peer_addr = *remote_addr.socket_addr();
 
@@ -293,14 +289,10 @@ impl Local for LocalResource {
     type Remote = RemoteResource;
 
     fn listen_with(
-        config: TransportListen,
+        config: ListenConfig,
         #[cfg(not(target_os = "linux"))] addr: SocketAddr,
         #[cfg(target_os = "linux")] mut addr: SocketAddr,
     ) -> io::Result<ListeningInfo<Self>> {
-        let config = match config {
-            TransportListen::Udp(config) => config,
-            _ => panic!("Internal error: Got wrong config"),
-        };
 
         let multicast = match addr {
             SocketAddr::V4(addr) if addr.ip().is_multicast() => Some(addr),

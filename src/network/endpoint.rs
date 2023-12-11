@@ -25,20 +25,20 @@ impl Endpoint {
     /// use message_io::node::{self, NodeEvent};
     /// use message_io::network::{Transport, Endpoint, NetEvent};
     ///
-    /// let (engine, handler) = node::split();
+    /// let (mut mux, handler) = node::split();
     /// handler.signals().send_with_timer((), std::time::Duration::from_secs(1)); //timeout
     ///
     /// let listen_addr = "127.0.0.1:0";
-    /// let (receiver_id_1, addr_1) = handler.network().listen(Transport::Udp, listen_addr).unwrap();
-    /// let (receiver_id_2, addr_2) = handler.network().listen(Transport::Udp, listen_addr).unwrap();
-    /// let (sender_id, _) = handler.network().listen(Transport::Udp, listen_addr).unwrap();
+    /// let (receiver_id_1, addr_1) = handler.listen(Transport::Udp, listen_addr).unwrap();
+    /// let (receiver_id_2, addr_2) = handler.listen(Transport::Udp, listen_addr).unwrap();
+    /// let (sender_id, _) = handler.listen(Transport::Udp, listen_addr).unwrap();
     ///
     /// //addr_1 and addr_2 contain the addresses with the listening ports.
-    /// handler.network().send(Endpoint::from_listener(sender_id, addr_1), &[23]);
-    /// handler.network().send(Endpoint::from_listener(sender_id, addr_2), &[42]);
+    /// handler.send(Endpoint::from_listener(sender_id, addr_1), &[23]);
+    /// handler.send(Endpoint::from_listener(sender_id, addr_2), &[42]);
     ///
     /// let (mut msg_1, mut msg_2) = (0, 0);
-    /// let mut task = node::node_listener_for_each_async(engine, &handler, move |event| match event {
+    /// let mut task = node::node_listener_for_each_async(mux, &handler, move |event| match event {
     ///     NodeEvent::Waker(_) => handler.stop(),
     ///     NodeEvent::Network(net_event) => match net_event {
     ///         NetEvent::Message(endpoint, message) => match endpoint.resource_id() {

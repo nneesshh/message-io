@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use std::io::{self};
+use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
 
 /// An struct that contains a remote address.

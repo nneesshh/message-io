@@ -19,7 +19,8 @@ all-features = true
 [features]
 default = ["tcp", "ssl"]
 tcp = ["mio/net", "socket2"]
-ssl = ["mio/net", "socket2", "rustls-tls-native-roots"]
+#ssl = ["mio/net", "socket2", "rustls-tls-native-roots"]
+ssl = ["mio/net", "socket2", "rustls-tls-webpki-roots"]
 websocket = ["tungstenite", "url", "tcp"]
 rustls-tls-native-roots = ["__rustls-tls", "rustls-native-certs", "pki-types", "rustls-pemfile"]
 rustls-tls-webpki-roots = ["__rustls-tls", "webpki-roots", "pki-types", "rustls-pemfile"]
@@ -30,11 +31,15 @@ serde = { version = "1", features = ["derive"] }
 crossbeam-channel = "0.5"
 crossbeam-utils = "0.8"
 log = "0.4"
+pki-types = { package = "rustls-pki-types", version = "1", features = ["std"], optional = true}
 strum = { version = "0.24", features = ["derive"] }
 socket2 = { version = "0.5", features = ["all"], optional = true}
 url = { version = "2", optional = true }
 integer-encoding = "3"
 lazy_static = "1"
+webpki = { package = "rustls-webpki", version = "0.102", features = ["alloc"], default-features = false }
+webpki-roots = { version = "0.26", optional = true }
+
 bytemuck = { path = "../bytemuck", features = ["derive"] }
 bytes = { path = "../bytes", default-features = false }
 hashbrown = { path="../hashbrown" }
@@ -46,9 +51,8 @@ parking_lot = { path = "../parking_lot" }
 pinky-swear = { path = "../pinky-swear" }
 rustls = { path = "../rustls/rustls", optional = true }
 rustls-native-certs = { path = "../rustls-native-certs", optional = true }
+rustls-pemfile = { path = "../pemfile", optional = true }
 tungstenite = { path = "../tungstenite-rs", optional = true }
-webpki = { path = "../webpki", package = "rustls-webpki", optional = true }
-webpki-roots = { path = "../webpki-roots", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies.nix]
 version = "0.26"
@@ -59,23 +63,14 @@ features = ["socket", "uio", "net"]
 version = "0.2"
 default-features = false
 
-[dependencies.pki-types]
-package = "rustls-pki-types"
-optional = true
-version = "0.2"
-
-[dependencies.rustls-pemfile]
-optional = true
-version = "=2.0.0-alpha.1"
-
 [dev-dependencies]
 bincode = "1"
 criterion = "0.4"
-fern = "0.6"
 chrono = { version = "0.4", features = ["clock"], default-features = false }
 test-case = "3"
 rand = { path = "../rand" }
 httparse = { path = "../httparse" }
+my_logger = { path = "../my_logger-rs" }
 doc-comment = "0.3"
 
 [[bench]]

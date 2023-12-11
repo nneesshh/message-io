@@ -1,9 +1,10 @@
-use message_io::network::{self, Endpoint, NetworkProcessor, Transport};
-use message_io::node;
+use message_io::network::{Endpoint, Transport};
+use message_io::node::{self, NodeHandler, NodeTask};
 use message_io::util::thread::NamespacedThread;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
+use net_packet::take_small_packet;
 #[cfg(feature = "websocket")]
 use tungstenite::{accept as ws_accept, connect as ws_connect, Message};
 #[cfg(feature = "websocket")]
@@ -23,18 +24,18 @@ lazy_static::lazy_static! {
     static ref TIMEOUT: Duration = Duration::from_millis(1);
 }
 
-fn init_connection(transport: Transport) -> (NetworkProcessor, Endpoint) {
-    let (engine, handler) = node::split();
+fn init_connection(transport: Transport) -> (NodeTask, NodeHandler, Endpoint) {
+    let (mux, handler) = node::split();
 
     let handler2 = handler.clone();
     let (promise, pinky) = pinky_swear::PinkySwear::<Endpoint>::new();
     let running = Arc::new(AtomicBool::new(true));
-    let mut _thread = {
+    let _thread = {
         let running = running.clone();
         NamespacedThread::spawn("perf-listening", move || {
-            let receiver_addr = handler2.network().listen_sync(transport, "127.0.0.1:0").unwrap().1;
-            let receiver = handler2.network().connect_sync(transport, receiver_addr).unwrap().0;
-            pinky.swear(receiver);
+            let server_addr = handler2.listen_sync(transport, "127.0.0.1:0").unwrap().1;
+            let endpoint = handler2.connect_sync(transport, server_addr).unwrap().0;
+            pinky.swear(endpoint);
 
             //
             running.store(false, Ordering::Relaxed);
@@ -42,16 +43,13 @@ fn init_connection(transport: Transport) -> (NetworkProcessor, Endpoint) {
     };
 
     //
-    let mut processor = network::create_processor(engine);
-
-    //
-    while running.load(Ordering::Relaxed) {
-        processor.process_poll_event(Some(*TIMEOUT), &mut |_| ());
-    }
+    let task = node::node_listener_for_each_async(mux, &handler, |_h, _| {
+        //
+    });
 
     // From here, the connection is performed independently of the transport used
-    let receiver = promise.wait();
-    (processor, receiver)
+    let endpoint = promise.wait();
+    (task, handler, endpoint)
 }
 
 fn latency_by_native_tcp(c: &mut Criterion) {
@@ -74,14 +72,14 @@ fn latency_by_native_tcp(c: &mut Criterion) {
 
 fn latency_by(c: &mut Criterion, transport: Transport) {
     let msg = format!("latency by {}", transport);
-    let (mut processor, endpoint) = init_connection(transport);
+    let (_task, handler, endpoint) = init_connection(transport);
 
     c.bench_function(&msg, |b| {
         b.iter(|| {
-            let resource_id = endpoint.resource_id();
-            let ep = processor.event_processor(resource_id.adapter_id());
-            ep.process_send(endpoint, &[0xFF]);
-            processor.process_poll_event(Some(*TIMEOUT), &mut |_| ());
+            let mut buffer = take_small_packet();
+            buffer.append_slice(&[0xFF]);
+            handler.send_sync(endpoint, buffer);
+            //handler.send(endpoint, buffer);
         });
     });
 }

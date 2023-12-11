@@ -161,7 +161,6 @@ pub mod encryption {
             let pri_key = load_private_key(&pri_key_path);
 
             let config = ServerConfig::builder()
-                .with_safe_defaults()
                 .with_no_client_auth()
                 .with_single_cert(certs, pri_key)
                 .expect("bad certificate/key");

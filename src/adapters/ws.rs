@@ -5,7 +5,7 @@ use crate::network::adapter::{
     Resource, SendStatus,
 };
 use crate::network::RemoteAddr;
-use crate::network::{TransportConnect, TransportListen};
+use crate::network::{ConnectConfig, ListenConfig};
 
 use mio::event::Source;
 use mio::net::{TcpListener, TcpStream};
@@ -81,7 +81,7 @@ impl Resource for RemoteResource {
 
 impl Remote for RemoteResource {
     fn connect_with(
-        _: TransportConnect,
+        _: ConnectConfig,
         remote_addr: RemoteAddr,
     ) -> io::Result<ConnectionInfo<Self>> {
         let (peer_addr, url) = match remote_addr {
@@ -337,7 +337,7 @@ impl Resource for LocalResource {
 impl Local for LocalResource {
     type Remote = RemoteResource;
 
-    fn listen_with(_: TransportListen, addr: SocketAddr) -> io::Result<ListeningInfo<Self>> {
+    fn listen_with(_: ListenConfig, addr: SocketAddr) -> io::Result<ListeningInfo<Self>> {
         let listener = TcpListener::bind(addr)?;
         let local_addr = listener.local_addr().unwrap();
         Ok(ListeningInfo { local: LocalResource { listener }, local_addr })

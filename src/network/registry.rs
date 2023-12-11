@@ -41,9 +41,9 @@ impl<S: Resource, P> LocklessResourceRegistry<S, P> {
 
     /// Add a resource into the registry.
     #[inline(always)]
-    pub fn register(&self, resource: S, properties: P, write_readiness: bool) -> ResourceId {
+    pub fn register(&self, id: ResourceId, resource: S, properties: P, write_readiness: bool) {
         let registry = unsafe { &mut *self.inner.get() };
-        registry.register(resource, properties, write_readiness)
+        registry.register(id, resource, properties, write_readiness);
     }
 
     /// Remove a register from the registry.
@@ -53,7 +53,8 @@ impl<S: Resource, P> LocklessResourceRegistry<S, P> {
     #[inline(always)]
     pub fn deregister(&self, id: ResourceId) -> bool {
         let registry = unsafe { &mut *self.inner.get() };
-        registry.deregister(id).is_some()
+        let is_some = registry.deregister(id).is_some();
+        is_some
     }
 
     /// Returned a shared reference of the register.
@@ -87,13 +88,12 @@ impl<S: Resource, P> ResourceRegistry<S, P> {
     }
 
     #[inline(always)]
-    fn register(&mut self, mut resource: S, properties: P, write_readiness: bool) -> ResourceId {
+    fn register(&mut self, id: ResourceId, mut resource: S, properties: P, write_readiness: bool) {
         // to generate events over not yet registered resources.
-        let id = self.poll_registry.add(resource.source(), write_readiness);
+        let id = self.poll_registry.add(id, resource.source(), write_readiness);
         let register = Register::new(resource, properties, self.poll_registry.clone());
         self.resources.insert(id, Rc::new(register));
         //log::info!("registry ++++ {:?} len={}", id, self.resources.len());
-        id
     }
 
     #[inline(always)]

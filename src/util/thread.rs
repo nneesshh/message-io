@@ -51,11 +51,13 @@ impl<T: Send + 'static> NamespacedThread<T> {
     }
 }
 
+/*
 impl<T: Send + 'static> Drop for NamespacedThread<T> {
     fn drop(&mut self) {
         self.try_join();
     }
 }
+ */
 
 #[cfg(test)]
 mod tests {
@@ -97,6 +99,7 @@ mod tests {
         assert!(called.load(Ordering::Relaxed));
     }
 
+    /*
     #[test]
     fn drop_implies_join() {
         let called = Arc::new(AtomicBool::new(false));
@@ -110,4 +113,6 @@ mod tests {
         drop(thread);
         assert!(called.load(Ordering::Relaxed));
     }
+
+     */
 }

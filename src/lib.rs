@@ -1,9 +1,8 @@
 //! Check the [Github README](https://github.com/lemunozm/message-io),
 //! to see an overview of the library.
 
-///
-mod waker_command;
-pub use waker_command::WakerCommand;
+/// NodeEvent = NetEvent + WakerCommand
+pub mod node_event;
 
 /// Adapter related information.
 /// If some adapter has special values or configuration, it is specified here.

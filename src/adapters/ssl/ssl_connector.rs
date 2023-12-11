@@ -15,7 +15,7 @@ pub mod encryption {
         ///
         pub fn wrap_stream<S>(
             socket: S,
-            domain: &str,
+            domain: String,
             tls_connector: Option<TlsConnector>,
         ) -> Result<SslStream<S>, String>
         where
@@ -46,19 +46,19 @@ pub mod encryption {
     #[cfg(feature = "__rustls-tls")]
     pub mod rustls {
         use std::{
-            convert::TryFrom,
             io::{Read, Write},
             sync::Arc,
         };
 
-        use rustls::{ClientConfig, ClientConnection, RootCertStore, ServerName, StreamOwned};
+        use pki_types::ServerName;
+        use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 
         use crate::adapters::ssl::ssl_stream::SslStream;
 
         ///
         pub fn wrap_stream<S>(
             socket: S,
-            domain: &str,
+            domain: String,
             tls_connector: Option<Arc<ClientConfig>>,
         ) -> Result<SslStream<S>, String>
         where
@@ -84,10 +84,7 @@ pub mod encryption {
                     }
 
                     Arc::new(
-                        ClientConfig::builder()
-                            .with_safe_defaults()
-                            .with_root_certificates(roots)
-                            .with_no_client_auth(),
+                        ClientConfig::builder().with_root_certificates(roots).with_no_client_auth(),
                     )
                 }
             };

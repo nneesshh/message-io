@@ -1,18 +1,25 @@
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
 #[cfg(feature = "tcp")]
-use crate::adapters::tcp::{TcpAdapter, TcpConnectConfig, TcpListenConfig};
+use crate::adapters::tcp::tcp_driver::TcpDriver;
 /*#[cfg(feature = "udp")]
-use crate::adapters::udp::{self, UdpAdapter, UdpConnectConfig, UdpListenConfig};
+use crate::adapters::udp::{self, UdpAdapter};
 
  */
 #[cfg(feature = "ssl")]
-use crate::adapters::ssl::ssl_adapter::{self, encryption::SslAdapter};
+use crate::adapters::ssl::ssl_driver::SslDriver;
 /*#[cfg(feature = "websocket")]
 use crate::adapters::ws::{self, WsAdapter};
  */
 
-use serde::{Deserialize, Serialize};
+use crate::network::loader::BoxedEventProcessor;
+use crate::node::NodeHandler;
 
-use super::{loader::EventProcessorList, PollEngine};
+use super::loader::EventProcessorList;
+use super::resource_id::ResourceIdGenerator;
+use super::MultiplexorWorkerParam;
 
 /// Enum to identified the underlying transport used.
 /// It can be passed to
@@ -54,22 +61,47 @@ pub enum Transport {
 impl Transport {
     /// Associates an adapter.
     /// This method mounts the adapters to be used in the network instance.
-    pub fn mount_adapter(self, engine: &mut PollEngine, processors: &mut EventProcessorList) {
+    pub fn mount_adapter(
+        self,
+        param: &mut MultiplexorWorkerParam,
+        node_handler: &NodeHandler,
+        remote_id_generator: &Arc<ResourceIdGenerator>,
+        local_id_generator: &Arc<ResourceIdGenerator>,
+        processors: &mut EventProcessorList,
+    ) {
         match self {
             #[cfg(feature = "tcp")]
-            Self::Tcp => engine.mount(self.id(), TcpAdapter, processors),
-            /*#[cfg(feature = "tcp")]
-            Self::FramedTcp => engine.mount(self.id(), FramedTcpAdapter, processors),
-            #[cfg(feature = "udp")]
-            Self::Udp => engine.mount(self.id(), UdpAdapter, processors),
+            Self::Tcp => {
+                //
+                let node_handler = node_handler.clone();
+                let adapter_id = self.id();
+                let poll = param.poll();
+                let driver =
+                    TcpDriver::new(remote_id_generator, local_id_generator, node_handler, poll);
+
+                let index = adapter_id as usize;
+                processors[index] = Box::new(driver) as BoxedEventProcessor;
+            }
+            /*#[cfg(feature = "udp")]
+            Self::Udp => param.mount(self.id(), UdpAdapter, node_handler, remote_id_generator, local_id_generator, processors),
 
              */
             #[cfg(feature = "ssl")]
-            Self::Ssl => engine.mount(self.id(), SslAdapter, processors),
-            /*#[cfg(feature = "websocket")]
-            Self::Ws => engine.mount(self.id(), WsAdapter, processors),
+            Self::Ssl => {
+                //
+                let node_handler = node_handler.clone();
+                let adapter_id = self.id();
+                let poll = param.poll();
 
-             */
+                let driver =
+                    SslDriver::new(remote_id_generator, local_id_generator, node_handler, poll);
+
+                let index = adapter_id as usize;
+                processors[index] = Box::new(driver) as BoxedEventProcessor;
+            } /*#[cfg(feature = "websocket")]
+              Self::Ws => param.mount(self.id(), WsAdapter, node_handler, remote_id_generator, local_id_generator, processors),
+
+               */
         };
     }
 
@@ -191,129 +223,5 @@ impl From<u8> for Transport {
 impl std::fmt::Display for Transport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
-    }
-}
-
-#[derive(Debug)]
-pub enum TransportConnect {
-    #[cfg(feature = "tcp")]
-    Tcp(TcpConnectConfig),
-    /*#[cfg(feature = "tcp")]
-    FramedTcp(FramedTcpConnectConfig),
-    #[cfg(feature = "udp")]
-    Udp(UdpConnectConfig),
-
-     */
-    #[cfg(feature = "ssl")]
-    Ssl(ssl_adapter::SslConnectConfig),
-    /*#[cfg(feature = "websocket")]
-    Ws,
-
-     */
-}
-
-impl TransportConnect {
-    pub fn id(&self) -> u8 {
-        let transport = match self {
-            #[cfg(feature = "tcp")]
-            Self::Tcp(_) => Transport::Tcp,
-            /*#[cfg(feature = "tcp")]
-            Self::FramedTcp(_) => Transport::FramedTcp,
-            #[cfg(feature = "udp")]
-            Self::Udp(_) => Transport::Udp,
-
-             */
-            #[cfg(feature = "ssl")]
-            Self::Ssl(_) => Transport::Ssl,
-            /*#[cfg(feature = "websocket")]
-            Self::Ws => Transport::Ws,
-
-             */
-        };
-
-        transport.id()
-    }
-}
-
-impl From<Transport> for TransportConnect {
-    fn from(transport: Transport) -> Self {
-        match transport {
-            #[cfg(feature = "tcp")]
-            Transport::Tcp => Self::Tcp(TcpConnectConfig::default()),
-            /*#[cfg(feature = "tcp")]
-            Transport::FramedTcp => Self::FramedTcp(FramedTcpConnectConfig::default()),
-            #[cfg(feature = "udp")]
-            Transport::Udp => Self::Udp(UdpConnectConfig::default()),
-
-             */
-            #[cfg(feature = "ssl")]
-            Transport::Ssl => Self::Ssl(ssl_adapter::SslConnectConfig::default()),
-            /*#[cfg(feature = "websocket")]
-            Transport::Ws => Self::Ws,
-
-             */
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum TransportListen {
-    #[cfg(feature = "tcp")]
-    Tcp(TcpListenConfig),
-    /*#[cfg(feature = "tcp")]
-    FramedTcp(FramedTcpListenConfig),
-    #[cfg(feature = "udp")]
-    Udp(UdpListenConfig),
-
-     */
-    #[cfg(feature = "ssl")]
-    Ssl(ssl_adapter::SslListenConfig),
-    /*#[cfg(feature = "websocket")]
-    Ws,
-
-     */
-}
-
-impl TransportListen {
-    pub fn id(&self) -> u8 {
-        let transport = match self {
-            #[cfg(feature = "tcp")]
-            Self::Tcp(_) => Transport::Tcp,
-            /*#[cfg(feature = "tcp")]
-            Self::FramedTcp(_) => Transport::FramedTcp,
-            #[cfg(feature = "udp")]
-            Self::Udp(_) => Transport::Udp,
-
-             */
-            #[cfg(feature = "ssl")]
-            Self::Ssl(_) => Transport::Ssl,
-            /*#[cfg(feature = "websocket")]
-            Self::Ws => Transport::Ws,
-
-             */
-        };
-
-        transport.id()
-    }
-}
-
-impl From<Transport> for TransportListen {
-    fn from(transport: Transport) -> Self {
-        match transport {
-            #[cfg(feature = "tcp")]
-            Transport::Tcp => Self::Tcp(TcpListenConfig::default()),
-            /*#[cfg(feature = "tcp")]
-            Transport::FramedTcp => Self::FramedTcp(FramedTcpListenConfig::default()),
-            #[cfg(feature = "udp")]
-            Transport::Udp => Self::Udp(UdpListenConfig::default()),
-
-             */
-            #[cfg(feature = "ssl")]
-            Transport::Ssl => Self::Ssl(ssl_adapter::SslListenConfig::default()),
-            /*#[cfg(feature = "websocket")]
-            Transport::Ws => Self::Ws,
-
-             */
-        }
     }
 }

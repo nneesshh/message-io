@@ -18,7 +18,7 @@ And each side has two main entities:
 - A synchronized queue (`EventSender` and `EventReceiver`) to send and receive signals from
   the own node.
   This is useful to make sending rates, messages based on timeouts, etc.
-- The network that is splited in a `NetworkController` to perform actions, and a `NetworkProcessor`
+- The network that is splited in a `NetworkController` to perform actions, and a `MultiplexorWorker`
   to receive events from the network.
   The actions could be create any number of connections/listener, remove them or sending messages.
   The connections are managed by the network and identified by an `Endpoint`, that is a few copiable/hashable struct that represent those connections uniquely.

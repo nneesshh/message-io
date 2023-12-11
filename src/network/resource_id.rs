@@ -119,20 +119,19 @@ impl std::fmt::Debug for ResourceId {
 /// Used by the adapters in order to create unique ids for their resources.
 pub struct ResourceIdGenerator {
     last: AtomicUsize,
-    adapter_id: u8,
     resource_type: ResourceType,
 }
 
 impl ResourceIdGenerator {
-    pub fn new(adapter_id: u8, resource_type: ResourceType) -> Self {
-        Self { last: AtomicUsize::new(1), adapter_id, resource_type }
+    pub fn new(resource_type: ResourceType) -> Self {
+        Self { last: AtomicUsize::new(1), resource_type }
     }
 
     /// Generates a new id.
     /// This id will contain information about the [`ResourceType`] and the associated adapter.
-    pub fn generate(&self) -> ResourceId {
+    pub fn generate(&self, adapter_id: u8) -> ResourceId {
         let last = self.last.fetch_add(1, Ordering::SeqCst);
-        ResourceId::new(self.adapter_id, self.resource_type, last)
+        ResourceId::new(adapter_id, self.resource_type, last)
     }
 }
 

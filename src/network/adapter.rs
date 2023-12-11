@@ -1,13 +1,14 @@
-use net_packet::NetPacketGuard;
-
-use crate::network::transport::{TransportConnect, TransportListen};
-
-use super::remote_addr::RemoteAddr;
+use std::io;
+use std::net::SocketAddr;
 
 use mio::event::Source;
+use mio::net::TcpStream;
+use net_packet::NetPacketGuard;
+use socket2::TcpKeepalive;
 
-use std::io::{self};
-use std::net::SocketAddr;
+use crate::util::unsafe_any::UnsafeAny;
+
+use super::driver::ListenConfig;
 
 /// High level trait to represent an adapter for a transport protocol.
 /// The adapter is only used to identify the resources of your adapter.
@@ -35,15 +36,21 @@ pub trait Resource {
 }
 
 /// Plain struct used as a returned value of [`Remote::connect_with()`]
-pub struct ConnectionInfo<R: Remote> {
+pub struct ConnectionInfo {
     /// The new created remote resource
-    pub remote: R,
+    pub stream: TcpStream,
 
     /// Local address of the interal resource used.
     pub local_addr: SocketAddr,
 
     /// Peer address of the interal resource used.
     pub peer_addr: SocketAddr,
+
+    ///
+    pub keepalive_opt: Option<TcpKeepalive>,
+
+    ///
+    pub domain_opt: Option<String>,
 }
 
 /// Plain struct used as a returned value of [`Local::listen_with()`]
@@ -120,20 +127,7 @@ pub enum PendingStatus {
 
 /// The resource used to represent a remote.
 /// It usually is a wrapper over a socket/stream.
-pub trait Remote: Resource + Sized {
-    /// Called when the user performs a connection request to an specific remote address.
-    /// The **implementator** is in change of creating the corresponding remote resource.
-    /// The [`TransportConnect`] wraps custom transport options for transports that support it. It
-    /// is guaranteed by the upper level to be of the variant matching the adapter. Therefore other
-    /// variants can be safely ignored.
-    /// The [`RemoteAddr`] contains either a [`SocketAddr`] or a [`url::Url`].
-    /// It is in charge of deciding what to do in both cases.
-    /// It also must return the extracted address as `SocketAddr`.
-    fn connect_with(
-        config: TransportConnect,
-        remote_addr: RemoteAddr,
-    ) -> io::Result<ConnectionInfo<Self>>;
-
+pub trait Remote: Resource + Send {
     /// Called when a remote resource received an event.
     /// The resource must be *ready* to receive this call.
     /// It means that it has available data to read,
@@ -145,7 +139,7 @@ pub trait Remote: Resource + Sized {
     /// Note that `receive()` could imply more than one call to `read`.
     /// The implementator must be read all data from the resource.
     /// For most of the cases it means read until the network resource returns `WouldBlock`.
-    fn receive(&self, process_data: impl FnMut(NetPacketGuard)) -> ReadStatus;
+    fn receive(&self, process_data: &mut dyn FnMut(NetPacketGuard)) -> ReadStatus;
 
     /// Sends raw data from a resource.
     /// The resource must be *ready* to receive this call.
@@ -179,13 +173,13 @@ pub trait Remote: Resource + Sized {
 }
 
 /// Used as a parameter callback in [`Local::accept()`]
-pub enum AcceptedType<'a, R> {
-    /// The listener has accepted a remote (`R`) with the specified addr.
+pub enum AcceptedType<'a> {
+    /// The listener has accepted a remote (`addr`, `stream`, `payload`) with the specified addr.
     /// The remote will be registered in order to generate read events. (calls to
     /// [`Remote::receive()`]).
     /// A [`crate::network::NetEvent::Accepted`] will be generated once this remote resource
     /// is considered *ready*.
-    Remote(SocketAddr, R),
+    Remote(SocketAddr, TcpStream, Box<dyn UnsafeAny + Send>),
 
     /// The listener has accepted data that can be packed into a message from a specified addr.
     /// Despite of `Remote`, accept as a `Data` will not register any Remote.
@@ -206,10 +200,10 @@ pub trait Local: Resource + Sized {
     /// The **implementator** is in change of creating the corresponding local resource.
     /// It also must returned the listening address since it could not be the same as param `addr`
     /// (e.g. listening from port `0`).
-    /// The [`TransportListen`] wraps custom transport options for transports that support it. It
+    /// The [`ListenConfig`] wraps custom transport options for transports that support it. It
     /// is guaranteed by the upper level to be of the variant matching the adapter. Therefore other
     /// variants can be safely ignored.
-    fn listen_with(config: TransportListen, addr: SocketAddr) -> io::Result<ListeningInfo<Self>>;
+    fn listen_with(config: ListenConfig, addr: SocketAddr) -> io::Result<ListeningInfo<Self>>;
 
     /// Called when a local resource received an event.
     /// It means that some resource have tried to connect.
@@ -220,7 +214,7 @@ pub trait Local: Resource + Sized {
     /// The **implementator** must process all these pending connections in this call.
     /// For most of the cases it means accept connections until the network
     /// resource returns `WouldBlock`.
-    fn accept(&self, accept_remote: impl FnMut(AcceptedType<'_, Self::Remote>));
+    fn accept(&self, accept_remote: impl FnMut(AcceptedType<'_>));
 
     /// Sends a raw data from a resource.
     /// Similar to [`Remote::send()`] but the resource that sends the data is a `Local`.

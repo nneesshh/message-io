@@ -1,6 +1,4 @@
-use super::resource_id::{
-    ResourceId, ResourceIdGenerator, ResourceType, RESERVED_BYTES_MASK, RESERVED_BYTES_POS,
-};
+use super::resource_id::{ResourceId, RESERVED_BYTES_MASK, RESERVED_BYTES_POS};
 
 use mio::event::Source;
 use mio::{Events, Interest, Poll as MioPoll, Registry, Token, Waker};
@@ -30,7 +28,6 @@ impl From<ResourceId> for Token {
 pub struct Poll {
     mio_poll: MioPoll,
     events: Events,
-    #[allow(dead_code)] //TODO: remove it with poll native event support
     waker: Arc<Waker>,
 }
 
@@ -90,8 +87,8 @@ impl Poll {
 
     ///
     #[inline(always)]
-    pub fn create_registry(&mut self, adapter_id: u8, resource_type: ResourceType) -> PollRegistry {
-        PollRegistry::new(adapter_id, resource_type, self.mio_poll.registry().try_clone().unwrap())
+    pub fn create_registry(&mut self) -> PollRegistry {
+        PollRegistry::new(self.mio_poll.registry().try_clone().unwrap())
     }
 
     ///
@@ -102,22 +99,22 @@ impl Poll {
 }
 
 pub struct PollRegistry {
-    id_generator: Arc<ResourceIdGenerator>,
     registry: Registry,
 }
 
 impl PollRegistry {
-    fn new(adapter_id: u8, resource_type: ResourceType, registry: Registry) -> Self {
-        Self {
-            id_generator: Arc::new(ResourceIdGenerator::new(adapter_id, resource_type)),
-            registry,
-        }
+    fn new(registry: Registry) -> Self {
+        Self { registry }
     }
 
     ///
     #[inline(always)]
-    pub fn add(&self, source: &mut dyn Source, write_readiness: bool) -> ResourceId {
-        let id = self.id_generator.generate();
+    pub fn add(
+        &self,
+        id: ResourceId,
+        source: &mut dyn Source,
+        write_readiness: bool,
+    ) -> ResourceId {
         let interest = match write_readiness {
             true => Interest::READABLE | Interest::WRITABLE,
             false => Interest::READABLE,
@@ -136,10 +133,7 @@ impl PollRegistry {
 impl Clone for PollRegistry {
     #[inline(always)]
     fn clone(&self) -> Self {
-        Self {
-            id_generator: self.id_generator.clone(),
-            registry: self.registry.try_clone().unwrap(),
-        }
+        Self { registry: self.registry.try_clone().unwrap() }
     }
 }
 

@@ -3,14 +3,14 @@
 use net_packet::NetPacketGuard;
 
 use crate::network::adapter::{
-    AcceptedType, Adapter, ConnectionInfo, ListeningInfo, Local, PendingStatus, ReadStatus, Remote,
-    Resource, SendStatus,
+    AcceptedType, Adapter, ListeningInfo, Local, PendingStatus, ReadStatus, Remote, Resource,
+    SendStatus,
 };
-use crate::network::{RemoteAddr, TransportConnect, TransportListen};
+use crate::network::driver::ListenConfig;
 
 use mio::event::Source;
 
-use std::io::{self};
+use std::io;
 use std::net::SocketAddr;
 
 pub(crate) struct MyAdapter;
@@ -27,14 +27,7 @@ impl Resource for RemoteResource {
 }
 
 impl Remote for RemoteResource {
-    fn connect_with(
-        config: TransportConnect,
-        remote_addr: RemoteAddr,
-    ) -> io::Result<ConnectionInfo<Self>> {
-        todo!()
-    }
-
-    fn receive(&self, process_data: impl FnMut(NetPacketGuard)) -> ReadStatus {
+    fn receive(&self, process_data: &mut dyn FnMut(NetPacketGuard)) -> ReadStatus {
         todo!()
     }
 
@@ -57,11 +50,11 @@ impl Resource for LocalResource {
 impl Local for LocalResource {
     type Remote = RemoteResource;
 
-    fn listen_with(config: TransportListen, addr: SocketAddr) -> io::Result<ListeningInfo<Self>> {
+    fn listen_with(config: ListenConfig, addr: SocketAddr) -> io::Result<ListeningInfo<Self>> {
         todo!()
     }
 
-    fn accept(&self, accept_remote: impl FnMut(AcceptedType<'_, Self::Remote>)) {
+    fn accept(&self, accept_remote: impl FnMut(AcceptedType<'_>)) {
         todo!()
     }
 }

@@ -4,3 +4,6 @@ pub mod thread;
 /// Frame encoding to convert a data stream into packets.
 /// It can be used as a utility to build adapters.
 pub mod encoding;
+
+///
+pub mod unsafe_any;

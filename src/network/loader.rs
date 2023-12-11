@@ -1,17 +1,21 @@
-use crate::events::{self, EventReceiver, EventSender};
-use crate::WakerCommand;
-
-use super::adapter::Adapter;
-use super::driver::{Driver, EventProcessor, NetEvent};
-use super::endpoint::Endpoint;
-use super::poll::Poll;
-use super::remote_addr::RemoteAddr;
-use super::resource_id::ResourceId;
-use super::SendStatus;
-use super::{TransportConnect, TransportListen};
-
-use std::io::{self};
+use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
+
+use mio::net::TcpStream;
+use socket2::TcpKeepalive;
+
+use crate::events::{self, EventReceiver, EventSender};
+use crate::node::NodeHandler;
+use crate::util::unsafe_any::UnsafeAny;
+
+use super::driver::{ConnectConfig, EventProcessor, ListenConfig};
+use super::endpoint::Endpoint;
+use super::net_event::NetEvent;
+use super::poll::Poll;
+use super::resource_id::ResourceId;
+use super::waker_command::WakerCommand;
+use super::{RemoteAddr, ResourceIdGenerator, ResourceType};
 
 ///
 pub type BoxedEventProcessor = Box<dyn EventProcessor>;
@@ -19,25 +23,33 @@ pub type BoxedEventProcessor = Box<dyn EventProcessor>;
 ///
 pub type EventProcessorList = Vec<BoxedEventProcessor>;
 
-/// Used to configured the engine
-pub struct PollEngine {
-    poll: Poll,
+///
+pub const MULTIPLEXOR_THREAD_NUM: usize = 4;
+
+/// Used to configure the event processor
+pub struct MultiplexorWorkerParam {
+    poll_opt: Option<Poll>,
     command_sender: EventSender<WakerCommand>,
     command_receiver: EventReceiver<WakerCommand>,
 }
 
-impl Default for PollEngine {
-    fn default() -> PollEngine {
+impl Default for MultiplexorWorkerParam {
+    fn default() -> MultiplexorWorkerParam {
         let (command_sender, command_receiver) = events::split();
-        Self { poll: Poll::default(), command_sender, command_receiver }
+        Self { poll_opt: Some(Poll::default()), command_sender, command_receiver }
     }
 }
 
-impl PollEngine {
+impl MultiplexorWorkerParam {
     ///
     #[inline(always)]
-    pub fn poll(&self) -> &Poll {
-        &self.poll
+    pub fn poll(&mut self) -> &mut Poll {
+        self.poll_opt.as_mut().unwrap()
+    }
+
+    /// Consume this instance to obtain the poll handles.
+    pub fn take_poll(mut self) -> Poll {
+        self.poll_opt.take().unwrap()
     }
 
     ///
@@ -51,24 +63,30 @@ impl PollEngine {
     pub fn command_receiver(&self) -> &EventReceiver<WakerCommand> {
         &self.command_receiver
     }
+}
 
-    /// Mount an adapter to create its driver associating it with an id.
-    pub fn mount(
-        &mut self,
-        adapter_id: u8,
-        adapter: impl Adapter + 'static,
-        processors: &mut EventProcessorList,
-    ) {
-        let poll = &mut self.poll;
-        let index = adapter_id as usize;
+fn split_id_generator() -> (Arc<ResourceIdGenerator>, Arc<ResourceIdGenerator>) {
+    let remote_id_generator = Arc::new(ResourceIdGenerator::new(ResourceType::Remote));
+    let local_id_generator = Arc::new(ResourceIdGenerator::new(ResourceType::Local));
+    (remote_id_generator, local_id_generator)
+}
 
-        let driver = Driver::new(adapter, adapter_id, poll);
-        processors[index] = Box::new(driver) as BoxedEventProcessor;
-    }
+///
+pub struct Multiplexor {
+    pub remote_id_generator: Arc<ResourceIdGenerator>,
+    pub local_id_generator: Arc<ResourceIdGenerator>,
+    pub worker_params: [Option<MultiplexorWorkerParam>; MULTIPLEXOR_THREAD_NUM + 1],
+}
 
-    /// Consume this instance to obtain the poll handles.
-    pub fn take(self) -> Poll {
-        self.poll
+impl Default for Multiplexor {
+    fn default() -> Multiplexor {
+        let (remote_id_generator, local_id_generator) = split_id_generator();
+        Self {
+            //
+            remote_id_generator,
+            local_id_generator,
+            worker_params: core::array::from_fn(|_i| Some(MultiplexorWorkerParam::default())),
+        }
     }
 }
 
@@ -89,27 +107,56 @@ impl EventProcessor for UnimplementedDriver {
     fn process_write(&mut self, _: ResourceId, _: &mut dyn FnMut(NetEvent)) {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
-    fn process_connect(
+    fn process_accept_register_remote(
         &mut self,
-        _: TransportConnect,
-        _: RemoteAddr,
-    ) -> io::Result<(Endpoint, SocketAddr)> {
+        _: (ResourceId, SocketAddr),
+        _: (ResourceId, SocketAddr),
+        _: TcpStream,
+        _: Box<dyn UnsafeAny + Send>,
+        _: Box<dyn FnOnce(&NodeHandler, io::Result<(Endpoint, SocketAddr)>) + Send>,
+    ) {
+        panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
+    }
+    fn process_connect_register_remote(
+        &mut self,
+        _: SocketAddr,
+        _: (ResourceId, SocketAddr),
+        _: TcpStream,
+        _: Option<TcpKeepalive>,
+        _: Option<String>,
+        _: Box<dyn FnOnce(&NodeHandler, io::Result<(Endpoint, SocketAddr)>) + Send>,
+    ) {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
     fn process_listen(
         &mut self,
-        _: TransportListen,
+        _: ListenConfig,
+        _: ResourceId,
         _: SocketAddr,
-    ) -> io::Result<(ResourceId, SocketAddr)> {
+        _: Box<dyn FnOnce(&NodeHandler, io::Result<(ResourceId, SocketAddr)>) + Send>,
+    ) {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
-    fn process_send(&mut self, _: Endpoint, _: &[u8]) -> SendStatus {
+    fn process_connect(
+        &mut self,
+        _: ConnectConfig,
+        _: ResourceId,
+        _: RemoteAddr,
+        _: Box<dyn FnOnce(&NodeHandler, io::Result<(Endpoint, SocketAddr)>) + Send>,
+    ) {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
-    fn process_close(&mut self, _: ResourceId) -> bool {
+    fn process_send(&mut self, _: Endpoint, _: &[u8]) {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
-    fn process_is_ready(&mut self, _: ResourceId) -> Option<bool> {
+    fn process_close(&mut self, _: ResourceId, _: Box<dyn FnOnce(&NodeHandler, bool) + Send>) {
+        panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
+    }
+    fn process_is_ready(
+        &mut self,
+        _: ResourceId,
+        _: Box<dyn FnOnce(&NodeHandler, Option<bool>) + Send>,
+    ) {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);
     }
 }
