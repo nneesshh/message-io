@@ -3,66 +3,6 @@
 ///
 pub mod encryption {
     ///
-    #[cfg(feature = "native-tls")]
-    pub mod native_tls {
-        use std::fs::File;
-        use std::io::{Read, Write};
-        use std::path::PathBuf;
-
-        use native_tls_crate::{HandshakeError as TlsHandshakeError, Identity, TlsAcceptor};
-
-        use crate::adapters::ssl::ssl_stream::SslStream;
-
-        use super::CERT_PATH;
-        use super::PRI_KEY_PATH;
-
-        ///
-        pub fn create_acceptor(
-            cert_path: PathBuf,
-            pri_key_path: PathBuf,
-        ) -> Result<TlsAcceptor, String> {
-            let mut cert_file = File::open(cert_path).unwrap();
-            let mut cert = vec![];
-            cert_file.read_to_end(&mut cert).unwrap();
-            let mut pri_key_file = File::open(pri_key_path).unwrap();
-            let mut pri_key = vec![];
-            pri_key_file.read_to_end(&mut pri_key).unwrap();
-
-            //
-            let pkcs8 = Identity::from_pkcs8(&cert, &pri_key).unwrap();
-            TlsAcceptor::new(pkcs8).map_err(|e| e.to_string())
-        }
-
-        ///
-        pub fn wrap_stream<S>(
-            socket: S,
-            acceptor: &mut TlsAcceptor,
-        ) -> Result<SslStream<S>, io::Error>
-        where
-            S: Read + Write,
-        {
-            //
-            let accepted = acceptor.accept(socket);
-            match accepted {
-                Err(e) => {
-                    //
-                    match e {
-                        TlsHandshakeError::Failure(f) => Err(f.to_string()),
-                        TlsHandshakeError::WouldBlock(_) => {
-                            panic!("Bug: TLS handshake not blocked")
-                        }
-                    }
-                }
-                Ok(s) => {
-                    //
-                    Ok(SslStream::NativeTls(s))
-                }
-            }
-        }
-    }
-
-    ///
-    #[cfg(feature = "__rustls-tls")]
     pub mod rustls {
         use std::fs::File;
         use std::io;

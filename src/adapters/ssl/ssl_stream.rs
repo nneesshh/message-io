@@ -5,18 +5,11 @@
 //! `Read + Write` traits.
 
 use std::io::{self, Read, Write};
+use std::ops::Deref;
 use std::sync::Arc;
 
-#[cfg(feature = "native-tls")]
-use native_tls_crate::TlsStream;
-
-#[cfg(feature = "__rustls-tls")]
 use rustls::server::Acceptor;
-use rustls::ServerConfig;
-#[cfg(feature = "__rustls-tls")]
-use rustls::{ClientConnection, ServerConnection, StreamOwned};
-#[cfg(feature = "__rustls-tls")]
-use std::ops::Deref;
+use rustls::{ClientConnection, ServerConfig, ServerConnection, StreamOwned};
 
 /// Stream mode, either plain TCP or TLS.
 #[derive(Clone, Copy, Debug)]
@@ -34,14 +27,6 @@ pub trait NoDelay {
     fn set_nodelay(&mut self, nodelay: bool) -> io::Result<()>;
 }
 
-#[cfg(feature = "native-tls")]
-impl<S: Read + Write + NoDelay> NoDelay for TlsStream<S> {
-    fn set_nodelay(&mut self, nodelay: bool) -> io::Result<()> {
-        self.get_mut().set_nodelay(nodelay)
-    }
-}
-
-#[cfg(feature = "__rustls-tls")]
 impl<S, SD, T> NoDelay for StreamOwned<S, T>
 where
     S: Deref<Target = rustls::ConnectionCommon<SD>>,
@@ -54,11 +39,6 @@ where
 }
 
 /// A stream that is protected with TLS.
-#[cfg(feature = "native-tls")]
-pub enum SslStream<S: Read + Write + Sized> {
-    NativeTls(native_tls_crate::TlsStream<S>),
-}
-#[cfg(feature = "__rustls-tls")]
 pub enum SslStream<S: Read + Write + Sized> {
     /// Raw stream with acceptor
     RustlsStreamAcceptor(Option<S>, Option<Acceptor>, Arc<ServerConfig>),

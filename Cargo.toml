@@ -19,12 +19,11 @@ all-features = true
 [features]
 default = ["tcp", "ssl"]
 tcp = ["mio/net", "socket2"]
-#ssl = ["mio/net", "socket2", "rustls-tls-native-roots"]
-ssl = ["mio/net", "socket2", "rustls-tls-webpki-roots"]
+ssl = ["mio/net", "socket2", "rustls-tls-native-roots"]
+#ssl = ["mio/net", "socket2", "rustls-tls-webpki-roots"]
 websocket = ["tungstenite", "url", "tcp"]
-rustls-tls-native-roots = ["__rustls-tls", "rustls-native-certs", "pki-types", "rustls-pemfile"]
-rustls-tls-webpki-roots = ["__rustls-tls", "webpki-roots", "pki-types", "rustls-pemfile"]
-__rustls-tls = ["rustls"]
+rustls-tls-native-roots = ["rustls", "rustls-native-certs", "pki-types", "rustls-pemfile"]
+rustls-tls-webpki-roots = ["rustls", "webpki-roots", "pki-types", "rustls-pemfile"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
