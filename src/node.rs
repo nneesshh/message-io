@@ -18,7 +18,7 @@ use crate::network::{ResourceIdGenerator, WakerCommand};
 use crate::node_event::{NodeEvent, NodeEventEmitterImpl};
 use crate::util::thread::NamespacedThread;
 
-pub const MULTIPLEXOR_THREAD_NUM: usize = 4;
+pub const MULTIPLEXOR_WORKER_NUM: usize = 4;
 
 lazy_static::lazy_static! {
     static ref SAMPLING_TIMEOUT: Duration = Duration::from_millis(5);
@@ -27,18 +27,18 @@ lazy_static::lazy_static! {
 ///
 pub fn split() -> (Multiplexor, NodeHandler) {
     let mut mux = Multiplexor::default();
-    let handler = create_node_handler(&mut mux, MULTIPLEXOR_THREAD_NUM);
+    let handler = create_node_handler(&mut mux, MULTIPLEXOR_WORKER_NUM);
     (mux, handler)
 }
 
 ///
-pub(crate) fn create_node_handler(mux: &mut Multiplexor, thread_num: usize) -> NodeHandler {
+pub(crate) fn create_node_handler(mux: &mut Multiplexor, worker_num: usize) -> NodeHandler {
     //
     let running = AtomicBool::new(true);
 
     //
     let mut controller_list = Vec::new();
-    for i in 0..thread_num {
+    for i in 0..worker_num {
         let mut param = MultiplexorWorkerParam::default();
         let command_sender = param.command_sender().clone();
         let waker = param.poll().create_waker();
