@@ -23,9 +23,6 @@ pub type BoxedEventProcessor = Box<dyn EventProcessor>;
 ///
 pub type EventProcessorList = Vec<BoxedEventProcessor>;
 
-///
-pub const MULTIPLEXOR_THREAD_NUM: usize = 4;
-
 /// Used to configure the event processor
 pub struct MultiplexorWorkerParam {
     poll_opt: Option<Poll>,
@@ -66,26 +63,26 @@ impl MultiplexorWorkerParam {
 }
 
 fn split_id_generator() -> (Arc<ResourceIdGenerator>, Arc<ResourceIdGenerator>) {
-    let remote_id_generator = Arc::new(ResourceIdGenerator::new(ResourceType::Remote));
-    let local_id_generator = Arc::new(ResourceIdGenerator::new(ResourceType::Local));
-    (remote_id_generator, local_id_generator)
+    let rgen = Arc::new(ResourceIdGenerator::new(ResourceType::Remote));
+    let lgen = Arc::new(ResourceIdGenerator::new(ResourceType::Local));
+    (rgen, lgen)
 }
 
 ///
 pub struct Multiplexor {
-    pub remote_id_generator: Arc<ResourceIdGenerator>,
-    pub local_id_generator: Arc<ResourceIdGenerator>,
-    pub worker_params: [Option<MultiplexorWorkerParam>; MULTIPLEXOR_THREAD_NUM + 1],
+    pub rgen: Arc<ResourceIdGenerator>,
+    pub lgen: Arc<ResourceIdGenerator>,
+    pub worker_params: Vec<Option<MultiplexorWorkerParam>>,
 }
 
 impl Default for Multiplexor {
     fn default() -> Multiplexor {
-        let (remote_id_generator, local_id_generator) = split_id_generator();
+        let (rgen, lgen) = split_id_generator();
         Self {
             //
-            remote_id_generator,
-            local_id_generator,
-            worker_params: core::array::from_fn(|_i| Some(MultiplexorWorkerParam::default())),
+            rgen,
+            lgen,
+            worker_params: Vec::new(),
         }
     }
 }

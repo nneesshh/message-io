@@ -11,12 +11,14 @@ use pinky_swear::PinkySwear;
 
 use crate::network::driver::{ConnectConfig, ListenConfig};
 use crate::network::{
-    self, Endpoint, Multiplexor, NetworkController, ResourceId, ResourceType, ToRemoteAddr,
-    Transport, MULTIPLEXOR_THREAD_NUM,
+    self, Endpoint, Multiplexor, MultiplexorWorkerParam, NetworkController, ResourceId,
+    ResourceType, ToRemoteAddr, Transport,
 };
 use crate::network::{ResourceIdGenerator, WakerCommand};
 use crate::node_event::{NodeEvent, NodeEventEmitterImpl};
 use crate::util::thread::NamespacedThread;
+
+pub const MULTIPLEXOR_THREAD_NUM: usize = 4;
 
 lazy_static::lazy_static! {
     static ref SAMPLING_TIMEOUT: Duration = Duration::from_millis(5);
@@ -25,41 +27,49 @@ lazy_static::lazy_static! {
 ///
 pub fn split() -> (Multiplexor, NodeHandler) {
     let mut mux = Multiplexor::default();
-    let handler = create_node_handler(&mut mux);
+    let handler = create_node_handler(&mut mux, MULTIPLEXOR_THREAD_NUM);
     (mux, handler)
 }
 
 ///
-pub(crate) fn create_node_handler(mux: &mut Multiplexor) -> NodeHandler {
+pub(crate) fn create_node_handler(mux: &mut Multiplexor, thread_num: usize) -> NodeHandler {
     //
     let running = AtomicBool::new(true);
 
     //
-    NodeHandler(Arc::new(NodeHandlerImpl {
-        remote_id_generator: mux.remote_id_generator.clone(),
-        local_id_generator: mux.local_id_generator.clone(),
+    let mut controller_list = Vec::new();
+    for i in 0..thread_num {
+        let mut param = MultiplexorWorkerParam::default();
+        let command_sender = param.command_sender().clone();
+        let waker = param.poll().create_waker();
+        let controller = NetworkController::new(i + 70001, command_sender, waker);
 
-        controller_list: core::array::from_fn(|i| {
-            let param = mux.worker_params[i].as_mut().unwrap();
-            let command_sender = param.command_sender().clone();
-            let waker = param.poll().create_waker();
-            let controller = NetworkController::new(i + 70001, command_sender, waker);
-            controller
-        }),
+        mux.worker_params.push(Some(param));
+        controller_list.push(controller)
+    }
+
+    //
+    NodeHandler(Arc::new(NodeHandlerImpl {
+        remote_id_generator: mux.rgen.clone(),
+        local_id_generator: mux.lgen.clone(),
+
+        controller_list,
+
         running,
     }))
 }
 
 #[inline(always)]
-fn to_worker_index(resource_id: ResourceId) -> usize {
-    1_usize + resource_id.raw() % MULTIPLEXOR_THREAD_NUM
+fn to_worker_index(worker_num: usize, resource_id: ResourceId) -> usize {
+    resource_id.raw() % worker_num
 }
 
 struct NodeHandlerImpl {
     remote_id_generator: Arc<ResourceIdGenerator>,
     local_id_generator: Arc<ResourceIdGenerator>,
 
-    controller_list: [NetworkController; MULTIPLEXOR_THREAD_NUM + 1],
+    controller_list: Vec<NetworkController>,
+
     running: AtomicBool,
 }
 
@@ -490,7 +500,8 @@ impl NodeHandler {
 
     #[inline(always)]
     fn controller(&self, resource_id: ResourceId) -> &NetworkController {
-        let idx = to_worker_index(resource_id);
+        let worker_num = self.0.controller_list.len();
+        let idx = to_worker_index(worker_num, resource_id);
         &self.0.controller_list[idx]
     }
 
@@ -578,8 +589,7 @@ fn launch_worker_thread(
         let param = mux.worker_params[index].take().unwrap();
 
         //
-        let remote_id_generator = mux.remote_id_generator.clone();
-        let local_id_generator = mux.local_id_generator.clone();
+        let rgen = mux.rgen.clone();
 
         //
         let handler = handler.clone();
@@ -587,9 +597,9 @@ fn launch_worker_thread(
             log::info!("launch multiplexor-worker-thread: {index}");
 
             //
-            let rgen = remote_id_generator.clone();
-            let lgen = local_id_generator.clone();
-            let mut worker = network::create_multiplexor_worker(param, &handler, &rgen, &lgen);
+            let remote_id_generator = rgen.clone();
+            let mut worker =
+                network::create_multiplexor_worker(param, &handler, &remote_id_generator);
 
             while handler.is_running() {
                 worker.process_poll_event(Some(*SAMPLING_TIMEOUT), &mut emitter);

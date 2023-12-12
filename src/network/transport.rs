@@ -65,8 +65,7 @@ impl Transport {
         self,
         param: &mut MultiplexorWorkerParam,
         node_handler: &NodeHandler,
-        remote_id_generator: &Arc<ResourceIdGenerator>,
-        local_id_generator: &Arc<ResourceIdGenerator>,
+        rgen: &Arc<ResourceIdGenerator>,
         processors: &mut EventProcessorList,
     ) {
         match self {
@@ -76,14 +75,13 @@ impl Transport {
                 let node_handler = node_handler.clone();
                 let adapter_id = self.id();
                 let poll = param.poll();
-                let driver =
-                    TcpDriver::new(remote_id_generator, local_id_generator, node_handler, poll);
+                let driver = TcpDriver::new(rgen, node_handler, poll);
 
                 let index = adapter_id as usize;
                 processors[index] = Box::new(driver) as BoxedEventProcessor;
             }
             /*#[cfg(feature = "udp")]
-            Self::Udp => param.mount(self.id(), UdpAdapter, node_handler, remote_id_generator, local_id_generator, processors),
+            Self::Udp => param.mount(self.id(), UdpAdapter, node_handler, remote_id_generator, processors),
 
              */
             #[cfg(feature = "ssl")]
@@ -93,13 +91,12 @@ impl Transport {
                 let adapter_id = self.id();
                 let poll = param.poll();
 
-                let driver =
-                    SslDriver::new(remote_id_generator, local_id_generator, node_handler, poll);
+                let driver = SslDriver::new(rgen, node_handler, poll);
 
                 let index = adapter_id as usize;
                 processors[index] = Box::new(driver) as BoxedEventProcessor;
             } /*#[cfg(feature = "websocket")]
-              Self::Ws => param.mount(self.id(), WsAdapter, node_handler, remote_id_generator, local_id_generator, processors),
+              Self::Ws => param.mount(self.id(), WsAdapter, node_handler, rgen, processors),
 
                */
         };

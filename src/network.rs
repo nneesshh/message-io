@@ -46,7 +46,7 @@ pub mod adapter;
 pub use adapter::SendStatus;
 pub use driver::{ConnectConfig, ListenConfig};
 pub use endpoint::Endpoint;
-pub use loader::{Multiplexor, MultiplexorWorkerParam, MULTIPLEXOR_THREAD_NUM};
+pub use loader::{Multiplexor, MultiplexorWorkerParam};
 pub use net_event::NetEvent;
 pub use poll::PollWaker;
 pub use remote_addr::{RemoteAddr, ToRemoteAddr};
@@ -61,21 +61,14 @@ use poll::{Poll, PollEvent};
 pub(crate) fn create_multiplexor_worker(
     mut param: MultiplexorWorkerParam,
     node_handler: &NodeHandler,
-    remote_id_generator: &Arc<ResourceIdGenerator>,
-    local_id_generator: &Arc<ResourceIdGenerator>,
+    rgen: &Arc<ResourceIdGenerator>,
 ) -> MultiplexorWorker {
     let command_receiver = param.command_receiver().clone();
     let mut processors: EventProcessorList = (0..ResourceId::MAX_ADAPTERS)
         .map(|_| Box::new(UnimplementedDriver) as BoxedEventProcessor)
         .collect();
     Transport::iter().for_each(|transport| {
-        transport.mount_adapter(
-            &mut param,
-            &node_handler,
-            remote_id_generator,
-            local_id_generator,
-            &mut processors,
-        )
+        transport.mount_adapter(&mut param, &node_handler, rgen, &mut processors)
     });
     MultiplexorWorker::new(param.take_poll(), command_receiver, processors)
 }

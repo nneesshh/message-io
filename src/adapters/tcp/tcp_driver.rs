@@ -24,7 +24,6 @@ use super::tcp_adapter::{LocalResource, RemoteResource, TcpAcceptPayload};
 /// Poll registry for one adapter
 pub struct TcpDriver {
     remote_id_generator: Arc<ResourceIdGenerator>,
-    local_id_generator: Arc<ResourceIdGenerator>,
 
     node_handler: NodeHandler,
     remote_registry: LocklessResourceRegistry<RemoteResource, RemoteProperties>,
@@ -32,9 +31,9 @@ pub struct TcpDriver {
 }
 
 impl TcpDriver {
+    ///
     pub fn new(
-        remote_id_generator: &Arc<ResourceIdGenerator>,
-        local_id_generator: &Arc<ResourceIdGenerator>,
+        rgen: &Arc<ResourceIdGenerator>,
         node_handler: NodeHandler,
         poll: &mut Poll,
     ) -> Self {
@@ -42,8 +41,7 @@ impl TcpDriver {
         let local_poll_registry = poll.create_registry();
 
         Self {
-            remote_id_generator: remote_id_generator.clone(),
-            local_id_generator: local_id_generator.clone(),
+            remote_id_generator: rgen.clone(),
 
             node_handler,
             remote_registry: LocklessResourceRegistry::<RemoteResource, RemoteProperties>::new(
@@ -54,13 +52,116 @@ impl TcpDriver {
             ),
         }
     }
+
+    #[inline(always)]
+    fn next_remote_id(&self, adapter_id: u8) -> ResourceId {
+        self.remote_id_generator.generate(adapter_id)
+    }
+
+    #[inline(always)]
+    fn resolve_pending_remote(
+        &self,
+        remote: &mut Rc<Register<RemoteResource, RemoteProperties>>,
+        endpoint: Endpoint,
+        mut event_callback: impl FnMut(NetEvent),
+    ) {
+        let status = remote.resource.pending();
+        log::trace!("Resolve pending for {}: {:?}", endpoint, status);
+        match status {
+            PendingStatus::Ready => {
+                remote.properties.mark_as_ready();
+                match remote.properties.local {
+                    Some(listener_id) => event_callback(NetEvent::Accepted(endpoint, listener_id)),
+                    None => event_callback(NetEvent::Connected(endpoint, true)),
+                }
+                remote.resource.ready_to_write();
+            }
+            PendingStatus::Incomplete => (),
+            PendingStatus::Disconnected => {
+                self.remote_registry.deregister(endpoint.resource_id());
+                if remote.properties.local.is_none() {
+                    event_callback(NetEvent::Connected(endpoint, false));
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn write_to_remote(
+        &self,
+        remote: &mut Rc<Register<RemoteResource, RemoteProperties>>,
+        endpoint: Endpoint,
+        mut event_callback: impl FnMut(NetEvent),
+    ) {
+        if !remote.resource.ready_to_write() {
+            event_callback(NetEvent::Disconnected(endpoint));
+        }
+    }
+
+    #[inline(always)]
+    fn read_from_remote(
+        &self,
+        remote: &mut Rc<Register<RemoteResource, RemoteProperties>>,
+        endpoint: Endpoint,
+        mut event_callback: impl FnMut(NetEvent),
+    ) {
+        let status =
+            remote.resource.receive(&mut |data| event_callback(NetEvent::Message(endpoint, data)));
+        log::trace!("Receive status: {:?}", status);
+        if let ReadStatus::Disconnected = status {
+            // Checked because, the user in the callback could have removed the same resource.
+            if self.remote_registry.deregister(endpoint.resource_id()) {
+                event_callback(NetEvent::Disconnected(endpoint));
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn read_from_local(
+        &self,
+        handler: &NodeHandler,
+        local: &mut Rc<Register<LocalResource, LocalProperties>>,
+        id: ResourceId,
+        mut event_callback: impl FnMut(NetEvent),
+    ) {
+        local.resource.accept(|accepted| {
+            //log::trace!("Accepted type: {}", accepted);
+            match accepted {
+                AcceptedType::Remote(remote_addr, stream, payload) => {
+                    //
+                    let local_addr = local.resource.listener.local_addr().unwrap();
+
+                    //
+                    let adapter_id = id.adapter_id();
+                    let remote_id = self.next_remote_id(adapter_id);
+
+                    // register TcpStream
+                    handler.post(
+                        remote_id,
+                        WakerCommand::AcceptRegisterRemote(
+                            (id, local_addr),
+                            (remote_id, remote_addr),
+                            stream,
+                            payload,
+                        ),
+                    );
+                }
+                AcceptedType::Data(addr, data) => {
+                    let endpoint = Endpoint::new(id, addr);
+
+                    let mut input_buffer = take_small_packet();
+                    input_buffer.append_slice(data);
+                    event_callback(NetEvent::Message(endpoint, input_buffer));
+                }
+            }
+        });
+    }
 }
 
 impl Clone for TcpDriver {
     fn clone(&self) -> Self {
         Self {
             remote_id_generator: self.remote_id_generator.clone(),
-            local_id_generator: self.local_id_generator.clone(),
 
             node_handler: self.node_handler.clone(),
             remote_registry: self.remote_registry.clone(),
@@ -307,106 +408,5 @@ impl EventProcessor for TcpDriver {
                 callback(&self.node_handler, l_opt.map(|_| true));
             }
         }
-    }
-}
-
-impl TcpDriver {
-    #[inline(always)]
-    fn resolve_pending_remote(
-        &self,
-        remote: &mut Rc<Register<RemoteResource, RemoteProperties>>,
-        endpoint: Endpoint,
-        mut event_callback: impl FnMut(NetEvent),
-    ) {
-        let status = remote.resource.pending();
-        log::trace!("Resolve pending for {}: {:?}", endpoint, status);
-        match status {
-            PendingStatus::Ready => {
-                remote.properties.mark_as_ready();
-                match remote.properties.local {
-                    Some(listener_id) => event_callback(NetEvent::Accepted(endpoint, listener_id)),
-                    None => event_callback(NetEvent::Connected(endpoint, true)),
-                }
-                remote.resource.ready_to_write();
-            }
-            PendingStatus::Incomplete => (),
-            PendingStatus::Disconnected => {
-                self.remote_registry.deregister(endpoint.resource_id());
-                if remote.properties.local.is_none() {
-                    event_callback(NetEvent::Connected(endpoint, false));
-                }
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn write_to_remote(
-        &self,
-        remote: &mut Rc<Register<RemoteResource, RemoteProperties>>,
-        endpoint: Endpoint,
-        mut event_callback: impl FnMut(NetEvent),
-    ) {
-        if !remote.resource.ready_to_write() {
-            event_callback(NetEvent::Disconnected(endpoint));
-        }
-    }
-
-    #[inline(always)]
-    fn read_from_remote(
-        &self,
-        remote: &mut Rc<Register<RemoteResource, RemoteProperties>>,
-        endpoint: Endpoint,
-        mut event_callback: impl FnMut(NetEvent),
-    ) {
-        let status =
-            remote.resource.receive(&mut |data| event_callback(NetEvent::Message(endpoint, data)));
-        log::trace!("Receive status: {:?}", status);
-        if let ReadStatus::Disconnected = status {
-            // Checked because, the user in the callback could have removed the same resource.
-            if self.remote_registry.deregister(endpoint.resource_id()) {
-                event_callback(NetEvent::Disconnected(endpoint));
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn read_from_local(
-        &self,
-        handler: &NodeHandler,
-        local: &mut Rc<Register<LocalResource, LocalProperties>>,
-        id: ResourceId,
-        mut event_callback: impl FnMut(NetEvent),
-    ) {
-        local.resource.accept(|accepted| {
-            //log::trace!("Accepted type: {}", accepted);
-            match accepted {
-                AcceptedType::Remote(remote_addr, stream, payload) => {
-                    //
-                    let local_addr = local.resource.listener.local_addr().unwrap();
-
-                    //
-                    let adapter_id = id.adapter_id();
-                    let remote_id = self.remote_id_generator.generate(adapter_id);
-
-                    // register TcpStream
-                    handler.post(
-                        remote_id,
-                        WakerCommand::AcceptRegisterRemote(
-                            (id, local_addr),
-                            (remote_id, remote_addr),
-                            stream,
-                            payload,
-                        ),
-                    );
-                }
-                AcceptedType::Data(addr, data) => {
-                    let endpoint = Endpoint::new(id, addr);
-
-                    let mut input_buffer = take_small_packet();
-                    input_buffer.append_slice(data);
-                    event_callback(NetEvent::Message(endpoint, input_buffer));
-                }
-            }
-        });
     }
 }
