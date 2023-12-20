@@ -68,7 +68,7 @@ pub(crate) fn ssl_remote_connect_with(
         stream,
         local_addr,
         peer_addr,
-        keepalive_opt: config.keepalive_opt.clone(),
+        keepalive_opt: config.keepalive_opt,
         domain_opt: Some(domain),
     })
 }

@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use mio::net::TcpStream;
 use net_packet::take_small_packet;
-use socket2::TcpKeepalive;
 
 use crate::adapters::tcp::tcp_remote::tcp_remote_connect_with;
 use crate::network::adapter::{AcceptedType, Local, PendingStatus, ReadStatus, Remote};
@@ -19,7 +18,7 @@ use crate::network::{Endpoint, NetEvent, RemoteAddr, SendStatus, WakerCommand};
 use crate::node::NodeHandler;
 use crate::util::unsafe_any::{UnsafeAny, UnsafeAnyExt};
 
-use super::tcp_adapter::{LocalResource, RemoteResource, TcpAcceptPayload};
+use super::tcp_adapter::{LocalResource, RemoteResource, TcpAcceptPayload, TcpConnectPayload};
 
 /// Poll registry for one adapter
 pub struct TcpDriver {
@@ -271,15 +270,19 @@ impl EventProcessor for TcpDriver {
         local_addr: SocketAddr,
         remote_pair: (ResourceId, SocketAddr),
         stream: TcpStream,
-        keepalive_opt: Option<TcpKeepalive>,
-        _domain_opt: Option<String>,
+        payload: Box<dyn UnsafeAny + Send>,
         callback: Box<dyn FnOnce(&NodeHandler, io::Result<(Endpoint, SocketAddr)>) + Send>,
     ) {
         let remote_id = remote_pair.0;
         let remote_addr = remote_pair.1;
 
         // register remote resource
-        let resource = RemoteResource { stream, keepalive_opt };
+        let payload = unsafe {
+            //
+            *payload.downcast_unchecked::<TcpConnectPayload>()
+        };
+
+        let resource = RemoteResource { stream, keepalive_opt: payload.keepalive_opt };
         self.remote_registry.register(
             remote_id,
             resource,
@@ -326,14 +329,15 @@ impl EventProcessor for TcpDriver {
         let connection_info_ret = tcp_remote_connect_with(config, peer_addr);
         let _ = connection_info_ret.map(|info| {
             // register TcpStream
+            let payload = Box::new(TcpConnectPayload { keepalive_opt: info.keepalive_opt });
+
             self.node_handler.post(
                 remote_id,
                 WakerCommand::ConnectRegisterRemote(
                     info.local_addr,
                     (remote_id, info.peer_addr),
                     info.stream,
-                    info.keepalive_opt,
-                    None,
+                    payload,
                     callback,
                 ),
             );

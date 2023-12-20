@@ -1,5 +1,6 @@
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -34,26 +35,27 @@ pub fn split() -> (Multiplexor, NodeHandler) {
 ///
 pub(crate) fn create_node_handler(mux: &mut Multiplexor, worker_num: usize) -> NodeHandler {
     //
+    const CONTROLLER_ID_BASE: usize = 7000;
     let running = AtomicBool::new(true);
 
-    //
-    let mut controller_list = Vec::new();
-    for i in 0..worker_num {
-        let mut param = MultiplexorWorkerParam::default();
-        let command_sender = param.command_sender().clone();
-        let waker = param.poll().create_waker();
-        let controller = NetworkController::new(i + 70001, command_sender, waker);
+    // master
+    let mut master = NetworkController::new(CONTROLLER_ID_BASE);
+    mux.master_param = master.param.take();
 
-        mux.worker_params.push(Some(param));
-        controller_list.push(controller)
+    // workers
+    let mut workers = Vec::new();
+    for i in 1..=worker_num {
+        let mut worker = NetworkController::new(CONTROLLER_ID_BASE + i);
+        mux.worker_params.push(worker.param.take());
+        workers.push(worker)
     }
 
-    //
     NodeHandler(Arc::new(NodeHandlerImpl {
         remote_id_generator: mux.rgen.clone(),
         local_id_generator: mux.lgen.clone(),
 
-        controller_list,
+        master,
+        workers,
 
         running,
     }))
@@ -68,7 +70,8 @@ struct NodeHandlerImpl {
     remote_id_generator: Arc<ResourceIdGenerator>,
     local_id_generator: Arc<ResourceIdGenerator>,
 
-    controller_list: Vec<NetworkController>,
+    master: NetworkController, // for listen and connect
+    workers: Vec<NetworkController>,
 
     running: AtomicBool,
 }
@@ -200,8 +203,8 @@ impl NodeHandler {
         let remote_id = self.next_remote_id(adapter_id);
         let addr = addr.to_remote_addr().unwrap();
 
-        // post to first thread
-        self.post0(WakerCommand::Connect(config, remote_id, addr, Box::new(cb)));
+        // post to the master controller
+        self.post_to_master(WakerCommand::Connect(config, remote_id, addr, Box::new(cb)));
     }
 
     /// Note that the `Connect` event will be also generated.
@@ -373,8 +376,8 @@ impl NodeHandler {
         let local_id = self.next_local_id(adapter_id);
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
 
-        // post to the first thread
-        self.post0(WakerCommand::Listen(config, local_id, addr, Box::new(cb)));
+        // post to the master controller
+        self.post_to_master(WakerCommand::Listen(config, local_id, addr, Box::new(cb)));
     }
 
     ///
@@ -462,12 +465,12 @@ impl NodeHandler {
     pub fn close(&self, id: ResourceId) {
         match id.resource_type() {
             ResourceType::Local => {
-                // controller of listener is at the first thread
-                self.controller0().do_post(WakerCommand::Close(id));
+                // local listener is at the master controller
+                self.post_to_master(WakerCommand::Close(id));
             }
             ResourceType::Remote => {
                 // thread by id
-                self.controller(id).do_post(WakerCommand::Close(id));
+                self.post(id, WakerCommand::Close(id));
             }
         }
     }
@@ -489,25 +492,25 @@ impl NodeHandler {
     ///
     #[inline(always)]
     pub fn post(&self, id: ResourceId, command: WakerCommand) {
-        self.controller(id).do_post(command);
+        self.worker(id).do_post(command);
     }
 
     ///
     #[inline(always)]
-    pub fn post0(&self, command: WakerCommand) {
-        self.controller0().do_post(command);
+    pub fn post_to_master(&self, command: WakerCommand) {
+        self.master().do_post(command);
     }
 
     #[inline(always)]
-    fn controller(&self, resource_id: ResourceId) -> &NetworkController {
-        let worker_num = self.0.controller_list.len();
+    fn worker(&self, resource_id: ResourceId) -> &NetworkController {
+        let worker_num = self.0.workers.len();
         let idx = to_worker_index(worker_num, resource_id);
-        &self.0.controller_list[idx]
+        &self.0.workers[idx]
     }
 
     #[inline(always)]
-    fn controller0(&self) -> &NetworkController {
-        &self.0.controller_list[0]
+    fn master(&self) -> &NetworkController {
+        &&self.0.master
     }
 }
 
@@ -565,41 +568,66 @@ where
 {
     let mut task = NodeTask { network_thread_vec: Vec::new() };
     let event_callback = Arc::new(event_callback);
+    let thr_counter = Arc::new(AtomicUsize::new(0));
+
+    //
+    let name = std::format!("multiplexor-master");
+    let param = mux.master_param.take().unwrap();
+    let master_thr =
+        launch_thread(name.as_str(), &mux.rgen, param, handler, &event_callback, &thr_counter);
+    task.network_thread_vec.push(master_thr);
 
     for i in 0..mux.worker_params.len() {
         //
-        let emitter = NodeEventEmitterImpl::new(handler, &event_callback);
-        let thr = launch_worker_thread(&mut mux, i, handler, emitter);
-        task.network_thread_vec.push(thr);
+        let name = std::format!("multiplexor-worker({})", i);
+
+        assert!(i < mux.worker_params.len());
+        let param = mux.worker_params[i].take().unwrap();
+        let worker_thr =
+            launch_thread(name.as_str(), &mux.rgen, param, handler, &event_callback, &thr_counter);
+        task.network_thread_vec.push(worker_thr);
+    }
+
+    // waiting for all threads ready
+    while thr_counter.load(Ordering::Relaxed) < (1 + mux.worker_params.len()) {
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
 
     task
 }
 
-fn launch_worker_thread(
-    mux: &mut Multiplexor,
-    index: usize,
+fn launch_thread<F>(
+    name: &str,
+    rgen: &Arc<ResourceIdGenerator>,
+    param: MultiplexorWorkerParam,
     handler: &NodeHandler,
-    mut emitter: NodeEventEmitterImpl,
-) -> NamespacedThread<()> {
+    event_callback: &Arc<F>,
+    thr_counter: &Arc<AtomicUsize>,
+) -> NamespacedThread<()>
+where
+    F: Fn(&NodeHandler, NodeEvent) + Send + Sync + 'static,
+{
+    //
+    let mut emitter = NodeEventEmitterImpl::new(handler, event_callback);
+
     //
     let network_thread = {
         //
-        assert!(index < mux.worker_params.len());
-        let param = mux.worker_params[index].take().unwrap();
-
-        //
-        let rgen = mux.rgen.clone();
+        let rgen = rgen.clone();
 
         //
         let handler = handler.clone();
-        NamespacedThread::spawn("multiplexor-worker-thread", move || {
-            log::info!("launch multiplexor-worker-thread: {index}");
+        let thread_name = name;
+        let name = name.to_owned();
+        let rgen = rgen.clone();
+        let thr_counter = thr_counter.clone();
+        NamespacedThread::spawn(thread_name, move || {
+            //
+            let mut worker = network::create_multiplexor_worker(&rgen, param, &handler);
 
             //
-            let remote_id_generator = rgen.clone();
-            let mut worker =
-                network::create_multiplexor_worker(param, &handler, &remote_id_generator);
+            log::info!("node_handler launch thread ({name})");
+            thr_counter.fetch_add(1, Ordering::Relaxed);
 
             while handler.is_running() {
                 worker.process_poll_event(Some(*SAMPLING_TIMEOUT), &mut emitter);
@@ -643,7 +671,7 @@ mod tests {
         let (mux, handler) = split();
         assert!(handler.is_running());
 
-        handler.post0(WakerCommand::Stop);
+        handler.post_to_master(WakerCommand::Stop);
 
         let mut task = node::node_listener_for_each_async(mux, &handler, move |h, _| h.stop());
 
@@ -673,7 +701,7 @@ mod tests {
         assert!(handler.is_running());
         std::thread::sleep(Duration::from_millis(500));
         assert!(handler.is_running());
-        handler.post0(WakerCommand::Stop);
+        handler.post_to_master(WakerCommand::Stop);
         task.wait();
     }
 
@@ -681,7 +709,7 @@ mod tests {
     fn wait_task() {
         let (mux, handler) = split();
 
-        handler.post0(WakerCommand::Stop);
+        handler.post_to_master(WakerCommand::Stop);
 
         node::node_listener_for_each_async(mux, &handler, move |h, _| h.stop()).wait();
 
@@ -692,7 +720,7 @@ mod tests {
     fn wait_already_waited_task() {
         let (mux, handler) = split();
 
-        handler.post0(WakerCommand::Stop);
+        handler.post_to_master(WakerCommand::Stop);
 
         let mut task = node::node_listener_for_each_async(mux, &handler, move |h, _| h.stop());
         task.wait();

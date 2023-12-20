@@ -6,8 +6,6 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use net_packet::take_small_packet;
 #[cfg(feature = "websocket")]
-use tungstenite::{accept as ws_accept, connect as ws_connect, Message};
-#[cfg(feature = "websocket")]
 use url::Url;
 
 use std::io::{Read, Write};

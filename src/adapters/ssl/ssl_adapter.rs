@@ -22,7 +22,7 @@ pub mod encryption {
 
     use rustls::ServerConfig;
 
-    use net_packet::{take_small_packet, NetPacketGuard, SMALL_PACKET_MAX_SIZE};
+    use net_packet::{take_small_packet, NetPacketGuard};
 
     use crate::adapters::ssl::ssl_acceptor::encryption::rustls::create_server_config;
     use crate::adapters::ssl::{ssl_acceptor, ssl_stream::SslStream};
@@ -36,6 +36,12 @@ pub mod encryption {
     pub struct SslAcceptPayload {
         pub keepalive_opt: Option<TcpKeepalive>,
         pub server_config: Arc<ServerConfig>,
+    }
+
+    ///
+    pub struct SslConnectPayload {
+        pub keepalive_opt: Option<TcpKeepalive>,
+        pub domain_opt: Option<String>,
     }
 
     ///
@@ -120,14 +126,14 @@ pub mod encryption {
                     SslStream::RustlsClientConnection(ref mut s) => {
                         //
                         let mut input_buffer = take_small_packet();
-                        let buf = input_buffer.extend(SMALL_PACKET_MAX_SIZE);
+                        let buf = input_buffer.as_write_mut();
 
                         //
                         match s.read(buf) {
                             Ok(0) => break ReadStatus::Disconnected,
                             Ok(size) => {
                                 //
-                                input_buffer.truncate(size);
+                                input_buffer.end_write(size);
                                 process_data(input_buffer);
                                 continue;
                             }
@@ -147,14 +153,14 @@ pub mod encryption {
                     SslStream::RustlsServerConnection(ref mut s) => {
                         //
                         let mut input_buffer = take_small_packet();
-                        let buf = input_buffer.extend(SMALL_PACKET_MAX_SIZE);
+                        let buf = input_buffer.as_write_mut();
 
                         //
                         match s.read(buf) {
                             Ok(0) => break ReadStatus::Disconnected,
                             Ok(size) => {
                                 //
-                                input_buffer.truncate(size);
+                                input_buffer.end_write(size);
                                 process_data(input_buffer);
                                 continue;
                             }
@@ -328,7 +334,7 @@ pub mod encryption {
                     LocalResource {
                         //
                         listener,
-                        keepalive_opt: config.keepalive_opt.clone(),
+                        keepalive_opt: config.keepalive_opt,
                         server_config,
                     }
                 },

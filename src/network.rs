@@ -59,16 +59,17 @@ use poll::{Poll, PollEvent};
 
 /// Create a multiplexor worker instance.
 pub(crate) fn create_multiplexor_worker(
+    rgen: &Arc<ResourceIdGenerator>,
     mut param: MultiplexorWorkerParam,
     node_handler: &NodeHandler,
-    rgen: &Arc<ResourceIdGenerator>,
 ) -> MultiplexorWorker {
     let command_receiver = param.command_receiver().clone();
     let mut processors: EventProcessorList = (0..ResourceId::MAX_ADAPTERS)
         .map(|_| Box::new(UnimplementedDriver) as BoxedEventProcessor)
         .collect();
+    let rgen = rgen.clone();
     Transport::iter().for_each(|transport| {
-        transport.mount_adapter(&mut param, &node_handler, rgen, &mut processors)
+        transport.mount_adapter(&mut param, &node_handler, &rgen, &mut processors)
     });
     MultiplexorWorker::new(param.take_poll(), command_receiver, processors)
 }
@@ -78,16 +79,18 @@ pub(crate) struct NetworkController {
     id: usize,
     commands: EventSender<WakerCommand>,
     waker: PollWaker,
+
+    pub param: Option<MultiplexorWorkerParam>,
 }
 
 impl NetworkController {
     ///
-    pub(crate) fn new(
-        id: usize,
-        commands: EventSender<WakerCommand>,
-        waker: PollWaker,
-    ) -> NetworkController {
-        Self { id, commands, waker }
+    pub(crate) fn new(id: usize) -> NetworkController {
+        let mut param = MultiplexorWorkerParam::default();
+        let command_sender = param.command_sender().clone();
+        let waker = param.poll().create_waker();
+
+        Self { id, param: Some(param), commands: command_sender, waker }
     }
 
     ///
@@ -204,8 +207,7 @@ impl MultiplexorWorker {
                                     local_addr,
                                     remote_pair,
                                     stream,
-                                    keepalive_opt,
-                                    domain_opt,
+                                    payload,
                                     cb,
                                 ) => {
                                     let remote_id = remote_pair.0;
@@ -217,8 +219,7 @@ impl MultiplexorWorker {
                                         local_addr,
                                         remote_pair,
                                         stream,
-                                        keepalive_opt,
-                                        domain_opt,
+                                        payload,
                                         cb,
                                     );
                                 }

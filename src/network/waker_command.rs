@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 
 use mio::net::TcpStream;
 use net_packet::NetPacketGuard;
-use socket2::TcpKeepalive;
 
 use crate::{
     network::{Endpoint, RemoteAddr, ResourceId},
@@ -26,8 +25,7 @@ pub enum WakerCommand {
         SocketAddr,
         (ResourceId, SocketAddr),
         TcpStream,
-        Option<TcpKeepalive>,
-        Option<String>,
+        Box<dyn UnsafeAny + Send>,
         Box<dyn FnOnce(&NodeHandler, io::Result<(Endpoint, SocketAddr)>) + Send>,
     ),
     Listen(
@@ -58,7 +56,7 @@ impl std::fmt::Debug for WakerCommand {
                 let remote_addr = remote_pair.1;
                 write!(f, "WakerCommand::AcceptRegisterRemote({remote_id:?}-{remote_addr:?})")
             }
-            WakerCommand::ConnectRegisterRemote(_, remote_pair, _stream, _, _, _) => {
+            WakerCommand::ConnectRegisterRemote(_, remote_pair, _stream, _, _) => {
                 let remote_id: ResourceId = remote_pair.0;
                 let remote_addr = remote_pair.1;
                 write!(f, "WakerCommand::ConnectRegisterRemote({remote_id:?}-{remote_addr:?})")

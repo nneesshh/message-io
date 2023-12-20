@@ -10,7 +10,7 @@ use crate::network::adapter::ConnectionInfo;
 use crate::network::driver::ConnectConfig;
 
 ///
-pub(crate) fn tcp_remote_connect_with(
+pub(crate) fn ws_remote_connect_with(
     config: ConnectConfig,
     peer_addr: SocketAddr,
 ) -> io::Result<ConnectionInfo> {

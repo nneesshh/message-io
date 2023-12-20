@@ -27,9 +27,6 @@ pub enum NetEvent {
     /// Input message received by the network.
     /// In packet-based transports, the data of a message sent corresponds with the data of this
     /// event. This one-to-one relation is not conserved in stream-based transports as *TCP*.
-    ///
-    /// If you want a packet-based protocol over *TCP* use
-    /// [`crate::network::Transport::FramedTcp`].
     Message(Endpoint, NetPacketGuard),
 
     /// This event is only dispatched when a connection is lost.

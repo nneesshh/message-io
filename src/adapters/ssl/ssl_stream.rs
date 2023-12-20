@@ -11,16 +11,6 @@ use std::sync::Arc;
 use rustls::server::Acceptor;
 use rustls::{ClientConnection, ServerConfig, ServerConnection, StreamOwned};
 
-/// Stream mode, either plain TCP or TLS.
-#[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
-pub enum Mode {
-    /// Plain mode (`ws://` URL).
-    Plain,
-    /// TLS mode (`wss://` URL).
-    Tls,
-}
-
 /// Trait to switch TCP_NODELAY.
 pub trait NoDelay {
     /// Set the TCP_NODELAY option to the given value.

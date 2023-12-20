@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use mio::net::TcpStream;
-use socket2::TcpKeepalive;
 
 use crate::events::{self, EventReceiver, EventSender};
 use crate::node::NodeHandler;
@@ -72,6 +71,7 @@ fn split_id_generator() -> (Arc<ResourceIdGenerator>, Arc<ResourceIdGenerator>) 
 pub struct Multiplexor {
     pub rgen: Arc<ResourceIdGenerator>,
     pub lgen: Arc<ResourceIdGenerator>,
+    pub master_param: Option<MultiplexorWorkerParam>,
     pub worker_params: Vec<Option<MultiplexorWorkerParam>>,
 }
 
@@ -82,6 +82,7 @@ impl Default for Multiplexor {
             //
             rgen,
             lgen,
+            master_param: None,
             worker_params: Vec::new(),
         }
     }
@@ -119,8 +120,7 @@ impl EventProcessor for UnimplementedDriver {
         _: SocketAddr,
         _: (ResourceId, SocketAddr),
         _: TcpStream,
-        _: Option<TcpKeepalive>,
-        _: Option<String>,
+        _: Box<dyn UnsafeAny + Send>,
         _: Box<dyn FnOnce(&NodeHandler, io::Result<(Endpoint, SocketAddr)>) + Send>,
     ) {
         panic!("{}", UNIMPLEMENTED_DRIVER_ERR);

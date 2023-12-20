@@ -7,9 +7,8 @@ pub mod udp;
 */
 #[cfg(feature = "ssl")]
 pub mod ssl;
-/*#[cfg(feature = "websocket")]
+#[cfg(feature = "websocket")]
 pub mod ws;
-*/
 
 // Add new adapters here
 // ...

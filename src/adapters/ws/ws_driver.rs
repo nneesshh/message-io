@@ -3,12 +3,12 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use http::Uri;
 use mio::net::TcpStream;
 use net_packet::take_small_packet;
-use parking_lot::Mutex;
+use parking_lot::lock_api::Mutex;
+use url::Url;
 
-use crate::adapters::ssl::ssl_remote::ssl_remote_connect_with;
+use crate::adapters::ws::ws_remote::ws_remote_connect_with;
 use crate::network::adapter::{AcceptedType, Local, PendingStatus, ReadStatus, Remote};
 use crate::network::driver::{
     ConnectConfig, EventProcessor, ListenConfig, LocalProperties, RemoteProperties,
@@ -20,14 +20,10 @@ use crate::network::{Endpoint, NetEvent, RemoteAddr, SendStatus, WakerCommand};
 use crate::node::NodeHandler;
 use crate::util::unsafe_any::{UnsafeAny, UnsafeAnyExt};
 
-use super::ssl_adapter::encryption::{
-    LocalResource, RemoteResource, SslAcceptPayload, SslConnectPayload,
-};
-use super::ssl_stream::SslStream;
-use super::{ssl_acceptor, ssl_connector};
+use super::ws_adapter::{PendingHandshake,LocalResource, RemoteResource, WsAcceptPayload, WsConnectPayload, RemoteState};
 
 /// Poll registry for one adapter
-pub struct SslDriver {
+pub struct WsDriver {
     remote_id_generator: Arc<ResourceIdGenerator>,
 
     node_handler: NodeHandler,
@@ -35,7 +31,7 @@ pub struct SslDriver {
     local_registry: LocklessResourceRegistry<LocalResource, LocalProperties>,
 }
 
-impl SslDriver {
+impl WsDriver {
     ///
     pub fn new(
         rgen: &Arc<ResourceIdGenerator>,
@@ -110,8 +106,9 @@ impl SslDriver {
         endpoint: Endpoint,
         mut event_callback: impl FnMut(NetEvent),
     ) {
-        let status =
-            remote.resource.receive(&mut |data| event_callback(NetEvent::Message(endpoint, data)));
+        let status = remote
+            .resource
+            .receive(&mut |data| event_callback(NetEvent::Message(endpoint, data)));
         log::trace!("Receive status: {:?}", status);
         if let ReadStatus::Disconnected = status {
             // Checked because, the user in the callback could have removed the same resource.
@@ -163,7 +160,7 @@ impl SslDriver {
     }
 }
 
-impl Clone for SslDriver {
+impl Clone for WsDriver {
     fn clone(&self) -> Self {
         Self {
             remote_id_generator: self.remote_id_generator.clone(),
@@ -175,7 +172,7 @@ impl Clone for SslDriver {
     }
 }
 
-impl EventProcessor for SslDriver {
+impl EventProcessor for WsDriver {
     #[inline(always)]
     fn process_read(&mut self, id: ResourceId, event_callback: &mut dyn FnMut(NetEvent)) {
         match id.resource_type() {
@@ -251,23 +248,16 @@ impl EventProcessor for SslDriver {
         let remote_id = remote_pair.0;
         let remote_addr = remote_pair.1;
 
-        //log::info!("accept along with remote_addr: {:?}", remote_addr);
-
-        let acceptor = ssl_acceptor::encryption::rustls::create_acceptor();
-
+        // register remote resource
         let payload = unsafe {
             //
-            *payload.downcast_unchecked::<SslAcceptPayload>()
+            *payload.downcast_unchecked::<WsAcceptPayload>()
         };
 
-        // register remote resource
         let resource = RemoteResource {
-            //
-            stream: Mutex::new(SslStream::RustlsStreamAcceptor(
-                Some(stream),
-                Some(acceptor),
-                payload.server_config,
-            )),
+            state: Mutex::new(RemoteState::Handshake(Some(PendingHandshake::Accept(
+                stream.into(),
+            )))),
             keepalive_opt: payload.keepalive_opt,
         };
         self.remote_registry.register(
@@ -294,34 +284,29 @@ impl EventProcessor for SslDriver {
         let remote_id = remote_pair.0;
         let remote_addr = remote_pair.1;
 
+        // register remote resource
         let payload = unsafe {
             //
-            *payload.downcast_unchecked::<SslConnectPayload>()
+            *payload.downcast_unchecked::<WsConnectPayload>()
         };
-        let domain = payload.domain_opt.unwrap();
 
-        let wrapped_stream = ssl_connector::encryption::rustls::wrap_stream(stream, domain, None);
-        match wrapped_stream {
-            Ok(s) => {
-                // register remote resource
-                let resource =
-                    RemoteResource { stream: Mutex::new(s), keepalive_opt: payload.keepalive_opt };
-                self.remote_registry.register(
-                    remote_id,
-                    resource,
-                    RemoteProperties::new(remote_addr, None),
-                    true,
-                );
+        let resource = RemoteResource {
+            state: Mutex::new(RemoteState::Handshake(Some(PendingHandshake::Connect(
+                payload.url,
+                stream.into(),
+            )))),
+            keepalive_opt: payload.keepalive_opt,
+        };
+        self.remote_registry.register(
+            remote_id,
+            resource,
+            RemoteProperties::new(remote_addr, None),
+            true,
+        );
 
-                // callback
-                let endpoint = Endpoint::new(remote_id, remote_addr);
-                callback(&self.node_handler, Ok((endpoint, local_addr)));
-            }
-            Err(_e) => {
-                //
-                std::unreachable!()
-            }
-        }
+        // callback
+        let endpoint = Endpoint::new(remote_id, remote_addr);
+        callback(&self.node_handler, Ok((endpoint, local_addr)));
     }
 
     fn process_listen(
@@ -334,7 +319,8 @@ impl EventProcessor for SslDriver {
         //
         let ret = LocalResource::listen_with(config, addr)
             .map(|info| {
-                self.local_registry.register(local_id, info.local, LocalProperties, false);
+                self.local_registry
+                    .register(local_id, info.local, LocalProperties, false);
                 (local_id, info.local_addr)
             })
             .map(|(resource_id, addr)| {
@@ -351,18 +337,30 @@ impl EventProcessor for SslDriver {
         raddr: RemoteAddr,
         callback: Box<dyn FnOnce(&NodeHandler, io::Result<(Endpoint, SocketAddr)>) + Send>,
     ) {
-        //
-        assert!(raddr.is_string());
-        let uri: Uri = raddr.to_string().parse().unwrap();
-        let peer_addr = *raddr.socket_addr();
+        let (peer_addr, url) = match raddr {
+            RemoteAddr::Socket(addr) => {
+                (addr, Url::parse(&format!("ws://{addr}/message-io-default")).unwrap())
+            }
+            RemoteAddr::Str(path) => {
+                let url = Url::parse(&path).expect("A valid URL");
+                let addr = url
+                    .socket_addrs(|| match url.scheme() {
+                        "ws" => Some(80),   // Plain
+                        "wss" => Some(443), //Tls
+                        _ => None,
+                    })
+                    .unwrap()[0];
+                (addr, url)
+            }
+        };
 
         //
-        let connection_info_ret = ssl_remote_connect_with(config, peer_addr, uri);
+        let connection_info_ret = ws_remote_connect_with(config, peer_addr);
         let _ = connection_info_ret.map(|info| {
             // register TcpStream
-            let payload = Box::new(SslConnectPayload {
+            let payload = Box::new(WsConnectPayload {
+                url,
                 keepalive_opt: info.keepalive_opt,
-                domain_opt: info.domain_opt,
             });
 
             self.node_handler.post(

@@ -83,8 +83,7 @@ pub trait EventProcessor {
         local_addr: SocketAddr,
         remote_pair: (ResourceId, SocketAddr),
         stream: TcpStream,
-        keepalive_opt: Option<TcpKeepalive>,
-        domain_opt: Option<String>,
+        payload: Box<dyn UnsafeAny + Send>,
         callback: Box<dyn FnOnce(&NodeHandler, io::Result<(Endpoint, SocketAddr)>) + Send>,
     );
     fn process_listen(

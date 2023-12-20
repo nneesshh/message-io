@@ -17,11 +17,13 @@ maintenance = { status = "actively-developed" }
 all-features = true
 
 [features]
+#default = ["tcp", "ssl", "websocket"]
 default = ["tcp", "ssl"]
 tcp = ["mio/net", "socket2"]
-ssl = ["mio/net", "socket2", "rustls-tls-native-roots"]
-#ssl = ["mio/net", "socket2", "rustls-tls-webpki-roots"]
-websocket = ["tungstenite", "url", "tcp"]
+ssl = ["mio/net", "socket2", "http", "rustls-tls-native-roots"]
+#ssl = ["mio/net", "socket2", "http", "rustls-tls-webpki-roots"]
+websocket = ["url", "tcp", "handshake"]
+handshake = ["data-encoding", "http", "httparse", "sha1", "url", "utf-8", "rand"]
 rustls-tls-native-roots = ["rustls", "rustls-native-certs", "pki-types", "rustls-pemfile"]
 rustls-tls-webpki-roots = ["rustls", "webpki-roots", "pki-types", "rustls-pemfile"]
 
@@ -30,19 +32,27 @@ serde = { version = "1", features = ["derive"] }
 crossbeam-channel = "0.5"
 crossbeam-utils = "0.8"
 log = "0.4"
+lazy_static = "1"
+thiserror = "1"
+byteorder = "1"
+integer-encoding = "3"
 pki-types = { package = "rustls-pki-types", version = "1", features = ["std"], optional = true}
+rand = { path = "../rand", features = ["small_rng"], optional = true }
+sha1 = { version = "0.10", optional = true }
 strum = { version = "0.24", features = ["derive"] }
 socket2 = { version = "0.5", features = ["all"], optional = true}
 url = { version = "2", optional = true }
-integer-encoding = "3"
-lazy_static = "1"
+utf-8 = { version = "0.7", optional = true }
 webpki = { package = "rustls-webpki", version = "0.102", features = ["alloc"], default-features = false }
 webpki-roots = { version = "0.26", optional = true }
 
+base64 = { path = "../rust-base64" }
 bytemuck = { path = "../bytemuck", features = ["derive"] }
 bytes = { path = "../bytes", default-features = false }
+data-encoding = { path = "../data-encoding/lib", optional = true }
 hashbrown = { path="../hashbrown" }
-http = { path = "../http" }
+http = { path = "../http", optional = true }
+httparse = { path = "../httparse", optional = true }
 mio = { path="../mio", features = ["os-poll"] }
 net_packet = { path = "../net_packet-rs" }
 opool = { path = "../opool" }
@@ -51,7 +61,6 @@ pinky-swear = { path = "../pinky-swear" }
 rustls = { path = "../rustls/rustls", optional = true }
 rustls-native-certs = { path = "../rustls-native-certs", optional = true }
 rustls-pemfile = { path = "../pemfile", optional = true }
-tungstenite = { path = "../tungstenite-rs", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies.nix]
 version = "0.26"

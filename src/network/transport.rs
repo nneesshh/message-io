@@ -10,9 +10,10 @@ use crate::adapters::udp::{self, UdpAdapter};
  */
 #[cfg(feature = "ssl")]
 use crate::adapters::ssl::ssl_driver::SslDriver;
-/*#[cfg(feature = "websocket")]
-use crate::adapters::ws::{self, WsAdapter};
- */
+#[cfg(feature = "websocket")]
+use crate::adapters::ws;
+#[cfg(feature = "websocket")]
+use crate::adapters::ws::ws_driver::WsDriver;
 
 use crate::network::loader::BoxedEventProcessor;
 use crate::node::NodeHandler;
@@ -31,7 +32,6 @@ pub enum Transport {
     /// TCP protocol (available through the *tcp* feature).
     /// As stream protocol, receiving a message from TCP do not imply to read
     /// the entire message.
-    /// If you want a packet based way to send over TCP, use `FramedTcp` instead.
     #[cfg(feature = "tcp")]
     Tcp,
     /*
@@ -47,15 +47,13 @@ pub enum Transport {
     /// Tls protocol
     #[cfg(feature = "ssl")]
     Ssl,
-    /*/// WebSocket protocol (available through the *websocket* feature).
+    /// WebSocket protocol (available through the *websocket* feature).
     /// If you use a [`crate::network::RemoteAddr::Str`] in the `connect()` method,
     /// you can specify an URL with `wss` of `ws` schemas to connect with or without security.
     /// If you use a [`crate::network::RemoteAddr::Socket`] the socket will be a normal
     /// websocket with the following uri: `ws://{SocketAddr}/message-io-default`.
     #[cfg(feature = "websocket")]
     Ws,
-
-     */
 }
 
 impl Transport {
@@ -68,13 +66,15 @@ impl Transport {
         rgen: &Arc<ResourceIdGenerator>,
         processors: &mut EventProcessorList,
     ) {
+        let node_handler = node_handler.clone();
+        let adapter_id = self.id();
+        let poll = param.poll();
+
+        //
         match self {
             #[cfg(feature = "tcp")]
             Self::Tcp => {
                 //
-                let node_handler = node_handler.clone();
-                let adapter_id = self.id();
-                let poll = param.poll();
                 let driver = TcpDriver::new(rgen, node_handler, poll);
 
                 let index = adapter_id as usize;
@@ -87,18 +87,19 @@ impl Transport {
             #[cfg(feature = "ssl")]
             Self::Ssl => {
                 //
-                let node_handler = node_handler.clone();
-                let adapter_id = self.id();
-                let poll = param.poll();
-
                 let driver = SslDriver::new(rgen, node_handler, poll);
 
                 let index = adapter_id as usize;
                 processors[index] = Box::new(driver) as BoxedEventProcessor;
-            } /*#[cfg(feature = "websocket")]
-              Self::Ws => param.mount(self.id(), WsAdapter, node_handler, rgen, processors),
+            }
+            #[cfg(feature = "websocket")]
+            Self::Ws => {
+                //
+                let driver = WsDriver::new(rgen, node_handler, poll);
 
-               */
+                let index = adapter_id as usize;
+                processors[index] = Box::new(driver) as BoxedEventProcessor;
+            }
         };
     }
 
@@ -112,18 +113,14 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Self::Tcp => usize::MAX,
-            /*#[cfg(feature = "tcp")]
-            Self::FramedTcp => usize::MAX,
-            #[cfg(feature = "udp")]
+            /*#[cfg(feature = "udp")]
             Self::Udp => udp::MAX_LOCAL_PAYLOAD_LEN,
 
              */
             #[cfg(feature = "ssl")]
             Self::Ssl => usize::MAX,
-            /*#[cfg(feature = "websocket")]
-            Self::Ws => ws::MAX_PAYLOAD_LEN,
-
-             */
+            #[cfg(feature = "websocket")]
+            Self::Ws => ws::ws_adapter::MAX_PAYLOAD_LEN,
         }
     }
 
@@ -133,18 +130,14 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Transport::Tcp => true,
-            /*#[cfg(feature = "tcp")]
-            Transport::FramedTcp => true,
-            #[cfg(feature = "udp")]
+            /*#[cfg(feature = "udp")]
             Transport::Udp => false,
 
              */
             #[cfg(feature = "ssl")]
             Transport::Ssl => true,
-            /*#[cfg(feature = "websocket")]
+            #[cfg(feature = "websocket")]
             Transport::Ws => true,
-
-             */
         }
     }
 
@@ -158,18 +151,14 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Transport::Tcp => false,
-            /*#[cfg(feature = "tcp")]
-            Transport::FramedTcp => true,
-            #[cfg(feature = "udp")]
+            /*#[cfg(feature = "udp")]
             Transport::Udp => true,
 
              */
             #[cfg(feature = "ssl")]
             Transport::Ssl => true,
-            /*#[cfg(feature = "websocket")]
+            #[cfg(feature = "websocket")]
             Transport::Ws => true,
-
-             */
         }
     }
 
@@ -179,18 +168,14 @@ impl Transport {
         match self {
             #[cfg(feature = "tcp")]
             Transport::Tcp => 0,
-            /*#[cfg(feature = "tcp")]
-            Transport::FramedTcp => 1,
-            #[cfg(feature = "udp")]
-            Transport::Udp => 2,
+            /*#[cfg(feature = "udp")]
+            Transport::Udp => 1,
 
              */
             #[cfg(feature = "ssl")]
-            Transport::Ssl => 3,
-            /*#[cfg(feature = "websocket")]
-            Transport::Ws => 4,
-
-             */
+            Transport::Ssl => 2,
+            #[cfg(feature = "websocket")]
+            Transport::Ws => 3,
         }
     }
 }
@@ -200,16 +185,14 @@ impl From<u8> for Transport {
         match id {
             #[cfg(feature = "tcp")]
             0 => Transport::Tcp,
-            /*#[cfg(feature = "tcp")]
-            1 => Transport::FramedTcp,
-            #[cfg(feature = "udp")]
-            2 => Transport::Udp,
+            /*#[cfg(feature = "udp")]
+            1 => Transport::Udp,
 
              */
             #[cfg(feature = "ssl")]
-            3 => Transport::Ssl,
+            2 => Transport::Ssl,
             /*#[cfg(feature = "websocket")]
-            4 => Transport::Ws,
+            3 => Transport::Ws,
 
              */
             _ => panic!("Not available transport"),

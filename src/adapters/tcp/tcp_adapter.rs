@@ -14,7 +14,7 @@ use std::os::{fd::AsRawFd, unix::io::FromRawFd};
 
 use mio::event::Source;
 use mio::net::{TcpListener, TcpStream};
-use net_packet::{take_small_packet, NetPacketGuard, SMALL_PACKET_MAX_SIZE};
+use net_packet::{take_small_packet, NetPacketGuard};
 pub use socket2::TcpKeepalive;
 
 use socket2::{Domain, Protocol, Socket, Type};
@@ -49,6 +49,11 @@ pub struct TcpAcceptPayload {
 }
 
 ///
+pub struct TcpConnectPayload {
+    pub keepalive_opt: Option<TcpKeepalive>,
+}
+
+///
 pub(crate) struct TcpAdapter;
 
 impl Adapter for TcpAdapter {
@@ -74,14 +79,14 @@ impl Remote for RemoteResource {
     fn receive(&self, process_data: &mut dyn FnMut(NetPacketGuard)) -> ReadStatus {
         loop {
             let mut input_buffer = take_small_packet();
-            let buf = input_buffer.extend(SMALL_PACKET_MAX_SIZE);
+            let buf = input_buffer.as_write_mut();
 
             let stream = &self.stream;
             match stream.deref().read(buf) {
                 Ok(0) => break ReadStatus::Disconnected,
                 Ok(size) => {
                     //
-                    input_buffer.truncate(size);
+                    input_buffer.end_write(size);
                     process_data(input_buffer)
                 }
                 Err(ref err) if err.kind() == ErrorKind::Interrupted => continue,
@@ -212,7 +217,7 @@ impl Local for LocalResource {
                 LocalResource {
                     //
                     listener,
-                    keepalive_opt: config.keepalive_opt.clone(),
+                    keepalive_opt: config.keepalive_opt,
                 }
             },
             local_addr,
