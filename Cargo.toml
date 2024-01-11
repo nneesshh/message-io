@@ -35,6 +35,7 @@ log = "0.4"
 lazy_static = "1"
 thiserror = "1"
 byteorder = "1"
+bytes = { version = "1", default-features = false }
 integer-encoding = "3"
 pki-types = { package = "rustls-pki-types", version = "1", features = ["std"], optional = true}
 rand = { path = "../rand", features = ["small_rng"], optional = true }
@@ -48,7 +49,6 @@ webpki-roots = { version = "0.26", optional = true }
 
 base64 = { path = "../rust-base64" }
 bytemuck = { path = "../bytemuck", features = ["derive"] }
-bytes = { path = "../bytes", default-features = false }
 data-encoding = { path = "../data-encoding/lib", optional = true }
 hashbrown = { path="../hashbrown" }
 http = { path = "../http", optional = true }
