@@ -55,7 +55,6 @@ http = { path = "../http", optional = true }
 httparse = { path = "../httparse", optional = true }
 mio = { path="../mio", features = ["os-poll"] }
 net_packet = { path = "../net_packet-rs" }
-opool = { path = "../opool" }
 parking_lot = { path = "../parking_lot" }
 pinky-swear = { path = "../pinky-swear" }
 rustls = { path = "../rustls/rustls", optional = true }
