@@ -18,7 +18,7 @@ all-features = true
 
 [features]
 #default = ["tcp", "ssl", "websocket"]
-default = ["tcp", "ssl"]
+default = ["tcp"]
 tcp = ["mio/net", "socket2"]
 ssl = ["mio/net", "socket2", "http", "rustls-tls-native-roots"]
 #ssl = ["mio/net", "socket2", "http", "rustls-tls-webpki-roots"]
